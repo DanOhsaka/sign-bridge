@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SignBridge — Live Translate</title>
+  <meta name="description" content="SignBridge — a live sign-language translator and learning companion. Capstone v0.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/views.css">
+</head>
+<body data-view="translate">
+
+  <div class="app">
+
+    <!-- ══════════ Top bar (shared across pages) ══════════ -->
+    <header class="topbar">
+      <a class="logo" href="index.html" aria-label="SignBridge home">
+        <span class="logo-mark">✋</span>
+        <span>
+          <span class="logo-name">Sign<em>Bridge</em></span>
+          <span class="logo-sub">live sign translator</span>
+        </span>
+      </a>
+
+      <nav class="nav" aria-label="Main">
+        <a data-nav="translate" href="index.html">Translate</a>
+        <a data-nav="practice" href="practice.html">Practice</a>
+        <a data-nav="learn" href="learn.html">Learn</a>
+      </nav>
+
+      <div class="topbar-actions">
+        <span class="engine-pill is-demo" id="enginePill"><span class="dot"></span><span class="pill-text">Demo · simulated</span></span>
+        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
+        <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+
+    <!-- ══════════ View: Translate ══════════ -->
+    <main class="view view--translate">
+
+      <!-- Left: the signing space -->
+      <section class="card stage-card">
+        <div class="stage-head">
+          <h1>Live translate
+            <small>Sign → text, in real time. Watch the machine read your hands.</small>
+          </h1>
+          <div class="segmented" id="modeSeg" role="tablist" aria-label="Engine mode">
+            <button class="is-on slug-demo" data-mode="demo">🧪 Demo</button>
+            <button class="slug-live" data-mode="live">📷 Live</button>
+          </div>
+          <div class="stage-toggles">
+            <button class="chip" id="mirrorToggle" title="Mirror the camera feed">🪞 Mirror</button>
+            <button class="chip" id="landmarkToggle" title="Show the 21-point hand skeleton">🦴 Landmarks</button>
+          </div>
+        </div>
+
+        <div class="stage" id="stage">
+          <!-- live mode -->
+          <video id="cam" autoplay playsinline muted></video>
+          <canvas id="overlay" aria-hidden="true"></canvas>
+
+          <!-- demo mode -->
+          <div class="stage-demo" id="stageDemo">
+            <div class="demo-hand">✋</div>
+            <h2>Demo mode</h2>
+            <p>Recognition is simulated so you can explore the whole UI before the model is trained. Press <span class="kbd">1</span>–<span class="kbd">9</span> to sign, or watch a full session.</p>
+            <div class="demo-actions">
+              <button class="btn btn-primary" id="watchDemo">▶ Watch a live demo</button>
+              <button class="btn btn-ghost" data-go-live="true">📷 Try real hand tracking</button>
+            </div>
+            <div class="demo-hint">Tip: switch to <strong>Live</strong> for real MediaPipe hand landmarks — the same skeleton your trained model will read.</div>
+          </div>
+        </div>
+
+        <div class="spell-strip">
+          <input class="input" id="spellInput" placeholder="Spell any word with your hands — try DOG, or your name…" maxlength="24" aria-label="Spell a word">
+          <button class="btn btn-soft" id="spellGo">Spell it</button>
+        </div>
+
+        <div class="stage-status" id="stageStatus"><span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.</div>
+
+        <!-- last recognised sign -->
+        <div class="card spotlight" id="spotlight">
+          <div class="spotlight-label">✨ Last signed</div>
+          <div class="spotlight-word">—</div>
+          <div class="conf-meter" aria-hidden="true"><div class="conf-fill" style="width:0%"></div></div>
+          <div class="spotlight-alts"></div>
+        </div>
+
+        <!-- quick phrases -->
+        <div class="quick-phrases">
+          <div class="q-label">🤟 Quick phrases — press a number or click to sign</div>
+          <div class="q-chips" id="quickChips"></div>
+        </div>
+      </section>
+
+      <!-- Right: the live transcript -->
+      <section class="card transcript-card">
+        <header>
+          <h2>Live transcript</h2>
+          <button class="icon-btn" id="tClear" title="Clear" aria-label="Clear transcript">🗑</button>
+          <button class="icon-btn" id="tCopy" title="Copy" aria-label="Copy transcript">⧉</button>
+          <button class="icon-btn" id="tSpeak" title="Speak out loud" aria-label="Speak transcript">🔊</button>
+        </header>
+        <div class="transcript" id="transcript" aria-live="polite">
+          <div class="empty">
+            <div class="empty-icon">🗣️</div>
+            Press <span class="kbd">1</span>–<span class="kbd">9</span>, click a phrase, or hit
+            <em>Watch a live demo</em> — everything streams here, word by word, with the machine's confidence visible on every word.
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- ══════════ Settings drawer (shared) ══════════ -->
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="settingsDrawer" aria-label="Settings">
+    <div class="drawer-head">
+      <h3>Settings</h3>
+      <button class="icon-btn" id="drawerClose" aria-label="Close settings">✕</button>
+    </div>
+    <div class="drawer-body">
+
+      <div class="field">
+        <label for="setTheme">Theme</label>
+        <select class="select" id="setTheme">
+          <option value="dark">Dark (default)</option>
+          <option value="light">Light</option>
+          <option value="auto">Follow system</option>
+        </select>
+        <span class="hint">Dark is preferred by many DHH users for high contrast on captions.</span>
+      </div>
+
+      <div class="field">
+        <label for="setVoice">Voice output</label>
+        <select class="select" id="setVoice"></select>
+        <span class="hint">Speaks the transcript back so hearing people can reply aloud.</span>
+      </div>
+
+      <div class="field">
+        <label for="setRate">Speaking rate — <span id="setRateVal">1×</span></label>
+        <input type="range" id="setRate" min="0.5" max="2" step="0.1">
+      </div>
+
+      <div class="field">
+        <label for="setThreshold">Confidence threshold — <span id="setThresholdVal"></span></label>
+        <input type="range" id="setThreshold" min="0.3" max="0.8" step="0.05">
+        <span class="hint">Words below this are flagged amber/red with alternates. Raise it to be stricter.</span>
+      </div>
+
+      <div class="toggle-row">
+        <span class="lbl">Mirror mode<small>Flip the camera like a mirror — how learners actually see their hands.</small></span>
+        <button class="toggle" id="setMirror" role="switch" aria-label="Mirror mode"></button>
+      </div>
+
+      <div class="toggle-row">
+        <span class="lbl">Landmark overlay<small>Draw the 21-point hand skeleton over the video.</small></span>
+        <button class="toggle" id="setLandmarks" role="switch" aria-label="Landmark overlay"></button>
+      </div>
+
+      <div class="toggle-row">
+        <span class="lbl">Reduce motion<small>Turn off animations (also honoured via OS setting).</small></span>
+        <button class="toggle" id="setReduceMotion" role="switch" aria-label="Reduce motion"></button>
+      </div>
+
+      <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+      <button class="btn btn-ghost" id="setReset" style="width:100%">Reset all progress &amp; settings</button>
+    </div>
+  </aside>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <!-- ══════════ Scripts (order matters — classic scripts, no build step) ══════════ -->
+  <script src="js/ui/common.js"></script>
+  <script src="js/data/signs.js"></script>
+  <script src="js/ui/transcript.js"></script>
+  <script src="js/engine/recognizer.js"></script>
+  <script src="js/engine/simulated.js"></script>
+  <script src="js/engine/live.js"></script>
+  <script src="js/views/translate.js"></script>
+  <script src="js/views/settings.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

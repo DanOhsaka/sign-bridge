@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SignBridge — Practice</title>
+  <meta name="description" content="SignBridge practice arena — letters, minimal pairs, spaced review.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/views.css">
+</head>
+<body data-view="practice">
+
+  <div class="app">
+
+    <header class="topbar">
+      <a class="logo" href="index.html" aria-label="SignBridge home">
+        <span class="logo-mark">✋</span>
+        <span>
+          <span class="logo-name">Sign<em>Bridge</em></span>
+          <span class="logo-sub">live sign translator</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a data-nav="translate" href="index.html">Translate</a>
+        <a data-nav="practice" href="practice.html">Practice</a>
+        <a data-nav="learn" href="learn.html">Learn</a>
+      </nav>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
+        <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+
+    <main class="view view--practice">
+      <div class="practice-head">
+        <h1>Practice arena
+          <small>Sign the letter on your keyboard (or tap the pad) — the recognizer reads you back.</small>
+        </h1>
+        <div class="segmented" id="practiceTabs">
+          <button class="is-on" data-tab="letters">✍️ Letters</button>
+          <button data-tab="phrases">🗣️ Phrases</button>
+        </div>
+      </div>
+
+      <!-- ══════════ Letters pane ══════════ -->
+      <div id="lettersPane">
+        <div class="practice-grid">
+
+          <div class="card arena">
+            <div class="arena-target" id="arenaTarget">
+              <div class="letter-card" id="targetLetter">A</div>
+              <div class="target-info">
+                <div class="section-title" style="font-size:15px">Sign <span id="targetTitle">A</span> with your hand</div>
+                <p class="target-desc" id="targetDesc"></p>
+                <div class="params-grid" aria-label="The four parameters of this sign">
+                  <div class="param"><div class="p-name">Handshape</div><div class="p-val" id="pShape"></div></div>
+                  <div class="param"><div class="p-name">Orientation</div><div class="p-val" id="pOrient"></div></div>
+                  <div class="param"><div class="p-name">Location</div><div class="p-val" id="pLoc"></div></div>
+                  <div class="param"><div class="p-name">Movement</div><div class="p-val" id="pMove"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="feedback" id="feedback" role="status"></div>
+
+            <div>
+              <div class="q-label" style="margin-bottom:8px">Letter pad — click or press the key</div>
+              <div class="letter-pad" id="letterPad"></div>
+            </div>
+          </div>
+
+          <div class="stats-card">
+            <div class="card card-pad">
+              <div class="section-title" style="font-size:16px">Session stats</div>
+              <div class="stat-row" style="margin-top:12px">
+                <div class="stat"><div class="stat-num" id="statLetter">A</div><div class="stat-lbl" id="statLetterNote">first try</div></div>
+                <div class="stat"><div class="stat-num" id="statStreak">0</div><div class="stat-lbl">Streak</div></div>
+                <div class="stat"><div class="stat-num" id="statBest">0</div><div class="stat-lbl">Best</div></div>
+              </div>
+            </div>
+
+            <div class="card card-pad">
+              <div class="ring-wrap">
+                <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+                  <defs>
+                    <linearGradient id="gradRing" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stop-color="#34e0c0"/>
+                      <stop offset="100%" stop-color="#8b8cff"/>
+                    </linearGradient>
+                  </defs>
+                  <circle class="ring-bg" cx="60" cy="60" r="45"/>
+                  <circle class="ring-fg" id="ringFg" cx="60" cy="60" r="45"/>
+                </svg>
+                <div class="ring-legend">
+                  <strong id="ringPct">0%</strong>
+                  <span id="ringNote">0 / 0 this session</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card card-pad">
+              <div class="section-title" style="font-size:16px">Review queue</div>
+              <p class="section-sub">Letters you missed come back until you master them — spaced practice, the way tutoring works.</p>
+              <div class="review-list" id="reviewList"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card card-pad" style="margin-top:20px">
+          <div class="section-title" style="font-size:16px">Minimal pairs — the classic confusion traps</div>
+          <p class="section-sub">These look almost identical. The recognizer gets them wrong too — which is why the UI teaches them.</p>
+          <div class="minipair-list" id="minipairList"></div>
+        </div>
+      </div>
+
+      <!-- ══════════ Phrases pane ══════════ -->
+      <div id="phrasesPane" style="display:none">
+        <div class="try-transcript" id="phraseResult" aria-live="polite"></div>
+        <div class="deck" id="phraseDeck"></div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Settings drawer (shared) -->
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="settingsDrawer" aria-label="Settings">
+    <div class="drawer-head">
+      <h3>Settings</h3>
+      <button class="icon-btn" id="drawerClose" aria-label="Close settings">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="field">
+        <label for="setTheme">Theme</label>
+        <select class="select" id="setTheme">
+          <option value="dark">Dark (default)</option>
+          <option value="light">Light</option>
+          <option value="auto">Follow system</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="setVoice">Voice output</label>
+        <select class="select" id="setVoice"></select>
+      </div>
+      <div class="field">
+        <label for="setRate">Speaking rate — <span id="setRateVal">1×</span></label>
+        <input type="range" id="setRate" min="0.5" max="2" step="0.1">
+      </div>
+      <div class="field">
+        <label for="setThreshold">Confidence threshold — <span id="setThresholdVal"></span></label>
+        <input type="range" id="setThreshold" min="0.3" max="0.8" step="0.05">
+      </div>
+      <div class="toggle-row">
+        <span class="lbl">Mirror mode<small>Flip the camera like a mirror.</small></span>
+        <button class="toggle" id="setMirror" role="switch" aria-label="Mirror mode"></button>
+      </div>
+      <div class="toggle-row">
+        <span class="lbl">Landmark overlay<small>Draw the 21-point hand skeleton.</small></span>
+        <button class="toggle" id="setLandmarks" role="switch" aria-label="Landmark overlay"></button>
+      </div>
+      <div class="toggle-row">
+        <span class="lbl">Reduce motion<small>Turn off animations.</small></span>
+        <button class="toggle" id="setReduceMotion" role="switch" aria-label="Reduce motion"></button>
+      </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+      <button class="btn btn-ghost" id="setReset" style="width:100%">Reset all progress &amp; settings</button>
+    </div>
+  </aside>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <script src="js/ui/common.js"></script>
+  <script src="js/data/signs.js"></script>
+  <script src="js/ui/transcript.js"></script>
+  <script src="js/engine/recognizer.js"></script>
+  <script src="js/engine/simulated.js"></script>
+  <script src="js/engine/live.js"></script>
+  <script src="js/views/practice.js"></script>
+  <script src="js/views/settings.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

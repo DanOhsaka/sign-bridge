@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SignBridge — Learn</title>
+  <meta name="description" content="SignBridge reference — sign dictionary, ASL facts, and how to communicate with Deaf people.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/views.css">
+</head>
+<body data-view="learn">
+
+  <div class="app">
+
+    <header class="topbar">
+      <a class="logo" href="index.html" aria-label="SignBridge home">
+        <span class="logo-mark">✋</span>
+        <span>
+          <span class="logo-name">Sign<em>Bridge</em></span>
+          <span class="logo-sub">live sign translator</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a data-nav="translate" href="index.html">Translate</a>
+        <a data-nav="practice" href="practice.html">Practice</a>
+        <a data-nav="learn" href="learn.html">Learn</a>
+      </nav>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
+        <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+      </div>
+    </header>
+
+    <main class="view view--learn">
+      <div class="learn-hero">
+        <h1>Learn to communicate</h1>
+        <p>Every card is a lesson: the sign, why it works, and the trap that gets students. Press <strong>Show me</strong> to watch it flow through the recognizer.</p>
+      </div>
+
+      <div class="learn-toolbar">
+        <input class="input" id="learnSearch" placeholder="Search signs — try 'help', 'water', 'family'…" aria-label="Search signs">
+        <div class="cat-chips" id="catChips"></div>
+      </div>
+
+      <div class="try-transcript" id="tryTranscript" aria-live="polite"></div>
+
+      <div class="learn-grid" id="signGrid"></div>
+
+      <div class="learn-sections">
+        <div class="card etiquette">
+          <div class="section-title">A quick guide to communicating with Deaf &amp; hard-of-hearing people</div>
+          <p class="section-sub">Sign language is the goal — but respect is the language underneath. Start here.</p>
+          <ol id="etiquetteList"></ol>
+        </div>
+
+        <div class="card card-pad">
+          <div class="section-title">How ASL actually works</div>
+          <p class="section-sub">Four facts that change how you learn — and how you design for it.</p>
+          <div class="learn-sections" id="factCards" style="margin-top:14px;gap:12px"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Settings drawer (shared) -->
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+  <aside class="drawer" id="settingsDrawer" aria-label="Settings">
+    <div class="drawer-head">
+      <h3>Settings</h3>
+      <button class="icon-btn" id="drawerClose" aria-label="Close settings">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="field">
+        <label for="setTheme">Theme</label>
+        <select class="select" id="setTheme">
+          <option value="dark">Dark (default)</option>
+          <option value="light">Light</option>
+          <option value="auto">Follow system</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="setVoice">Voice output</label>
+        <select class="select" id="setVoice"></select>
+      </div>
+      <div class="field">
+        <label for="setRate">Speaking rate — <span id="setRateVal">1×</span></label>
+        <input type="range" id="setRate" min="0.5" max="2" step="0.1">
+      </div>
+      <div class="field">
+        <label for="setThreshold">Confidence threshold — <span id="setThresholdVal"></span></label>
+        <input type="range" id="setThreshold" min="0.3" max="0.8" step="0.05">
+      </div>
+      <div class="toggle-row">
+        <span class="lbl">Mirror mode<small>Flip the camera like a mirror.</small></span>
+        <button class="toggle" id="setMirror" role="switch" aria-label="Mirror mode"></button>
+      </div>
+      <div class="toggle-row">
+        <span class="lbl">Landmark overlay<small>Draw the 21-point hand skeleton.</small></span>
+        <button class="toggle" id="setLandmarks" role="switch" aria-label="Landmark overlay"></button>
+      </div>
+      <div class="toggle-row">
+        <span class="lbl">Reduce motion<small>Turn off animations.</small></span>
+        <button class="toggle" id="setReduceMotion" role="switch" aria-label="Reduce motion"></button>
+      </div>
+      <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+      <button class="btn btn-ghost" id="setReset" style="width:100%">Reset all progress &amp; settings</button>
+    </div>
+  </aside>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <script src="js/ui/common.js"></script>
+  <script src="js/data/signs.js"></script>
+  <script src="js/ui/transcript.js"></script>
+  <script src="js/engine/recognizer.js"></script>
+  <script src="js/engine/simulated.js"></script>
+  <script src="js/engine/live.js"></script>
+  <script src="js/views/learn.js"></script>
+  <script src="js/views/settings.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
