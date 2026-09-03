@@ -1,0 +1,16 @@
+{
+  "name": "SignBridge",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "python3 -m http.server 8000 --bind 0.0.0.0",
+      "description": "Static file server for the SignBridge web app. Open http://localhost:8000 for the Translate view (index.html), plus practice.html and learn.html."
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 8000
+    }
+  ]
+}
