@@ -1,195 +1,512 @@
 /* ============================================================
-   SignBridge — Live engine (live.js)
-   ------------------------------------------------------------
-   Real hand tracking in the browser via MediaPipe Hands (CDN,
-   no build step). This runs TODAY, with no trained model:
-
-     • live webcam feed with the 21-point hand skeleton drawn
-       over it — the same skeleton your future model consumes
-     • hand-presence events (pulses the status line)
-     • a classifier plug-in point: `setClassifier(fn)` receives
-       the normalized landmark vector; whatever token object it
-       returns flows into the transcript exactly like demo
-       tokens — the UI can't tell the difference.
-
-   Feature vector contract (document this to the ML team):
-     [x0, y0, z0, x1, y1, z1, …] — 63 floats.
-     x/y normalized to the hand bounding box, z normalized
-     relative to the wrist (z0 = 0). This is the standard
-     MediaPipe→classifier input used by the papers in
-     docs/MODELS.md.
-
-   NOTE: camera access requires a secure context — serve over
-   http://localhost or https (file:// blocks getUserMedia in
-   Chrome). See README.
+   SignBridge — Live MediaPipe Engine
+   Uses MediaPipe HolisticLandmarker for:
+   - Left hand
+   - Right hand
+   - Pose (shoulders, elbows, wrists)
    ============================================================ */
 
 window.SB = window.SB || {};
 
 SB.LiveEngine = function () {
   var self = this;
-  var state = "off";            // off | starting | on | error
-  var classifier = null;        // fn(features:Float32Array) -> token|null
-  var hands = null;
-  var camera = null;
+
+  var state = "off";
+  var classifier = null;
+
+  var holistic = null;
   var stream = null;
+
+  var videoEl = null;
+  var canvasEl = null;
+
   var running = false;
+  var animationFrameId = null;
+  var lastVideoTime = -1;
 
-  var CDN = "https://cdn.jsdelivr.net/npm/";
-  var LIBS = [
-    CDN + "@mediapipe/hands/hands.js",
-    CDN + "@mediapipe/camera_utils/camera_utils.js",
-    CDN + "@mediapipe/drawing_utils/drawing_utils.js",
-  ];
+  var mirror = true;
+  var drawLandmarksEnabled = true;
 
-  /* ---- tiny promise-based script loader ---- */
-  function loadScript(src) {
-    return new Promise(function (resolve, reject) {
-      if (document.querySelector('script[src="' + src + '"]')) return resolve();
-      var s = document.createElement("script");
-      s.src = src; s.async = true;
-      s.onload = resolve;
-      s.onerror = function () { reject(new Error("Couldn't load " + src)); };
-      document.head.appendChild(s);
+  // ----------------------------------------------------------
+  // Load the new MediaPipe HolisticLandmarker
+  // ----------------------------------------------------------
+
+  function loadHolistic() {
+    return import(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/+esm"
+    ).then(async function (visionModule) {
+
+      var FilesetResolver = visionModule.FilesetResolver;
+      var HolisticLandmarker = visionModule.HolisticLandmarker;
+
+      console.log("Loading MediaPipe HolisticLandmarker...");
+
+      var vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+
+      holistic = await HolisticLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/" +
+            "holistic_landmarker/holistic_landmarker/float16/1/" +
+            "holistic_landmarker.task"
+        },
+        runningMode: "VIDEO"
+      });
+
+      console.log("MediaPipe HolisticLandmarker loaded.");
     });
   }
 
-  function loadLibs() {
-    return LIBS.reduce(function (p, src) {
-      return p.then(function () { return loadScript(src); });
-    }, Promise.resolve());
-  }
+  // ----------------------------------------------------------
+  // Existing LiveEngine API
+  // ----------------------------------------------------------
 
-  /* ---- public API ---- */
+  self.setClassifier = function (fn) {
+    classifier = fn || null;
+  };
 
-  self.setClassifier = function (fn) { classifier = fn || null; };
-  self.hasClassifier = function () { return !!classifier; };
-  self.getState = function () { return state; };
+  self.hasClassifier = function () {
+    return !!classifier;
+  };
+
+  self.getState = function () {
+    return state;
+  };
+
+  // ----------------------------------------------------------
+  // Start camera
+  // ----------------------------------------------------------
 
   self.start = function (opts) {
     opts = opts || {};
-    if (state === "starting") return Promise.resolve();
+
+    if (state === "starting" || state === "on") {
+      return Promise.resolve(self);
+    }
+
     state = "starting";
 
-    var videoEl = opts.videoEl;
-    var canvasEl = opts.canvasEl;
-    var mirror = opts.mirror !== false;
-    var drawLandmarks = opts.drawLandmarks !== false;
+    videoEl = opts.videoEl;
+    canvasEl = opts.canvasEl;
+
+    mirror = opts.mirror !== false;
+    drawLandmarksEnabled = opts.drawLandmarks !== false;
 
     if (!videoEl || !canvasEl) {
       state = "error";
-      return Promise.reject(new Error("video/canvas elements missing"));
+      return Promise.reject(new Error("Video/canvas elements missing"));
     }
+
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       state = "error";
-      return Promise.reject(new Error("Camera not available in this browser (needs https or localhost)"));
+      return Promise.reject(
+        new Error("Camera not available. Use HTTPS or localhost.")
+      );
     }
 
-    return loadLibs().then(function () {
-      return navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 960 }, audio: false });
-    }).then(function (camStream) {
-      stream = camStream;
-      videoEl.srcObject = stream;
-      return new Promise(function (res) { videoEl.onloadedmetadata = res; });
-    }).then(function () {
-      hands = new Hands({ locateFile: function (f) { return CDN + "@mediapipe/hands/" + f; } });
-      hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        selfieMode: mirror,
-        minDetectionConfidence: 0.6,
-        minTrackingConfidence: 0.55,
+    // Don't reload the model every time Live is toggled.
+    var loadPromise = holistic
+      ? Promise.resolve()
+      : loadHolistic();
+
+    return loadPromise
+      .then(function () {
+        console.log("Requesting webcam...");
+
+        return navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 60, min: 30 }
+          },
+          audio: false
+        });
+      })
+
+      .then(function (camStream) {
+        stream = camStream;
+        var videoTrack = stream.getVideoTracks()[0];
+        console.log("Camera settings:", videoTrack.getSettings());
+        videoEl.srcObject = stream;
+
+        return new Promise(function (resolve) {
+          if (videoEl.readyState >= 1 && videoEl.videoWidth > 0) {
+            resolve();
+          } else {
+            videoEl.onloadedmetadata = resolve;
+          }
+        });
+      })
+
+      .then(function () {
+        return videoEl.play();
+      })
+
+      .then(function () {
+        canvasEl.width = videoEl.videoWidth || 640;
+        canvasEl.height = videoEl.videoHeight || 480;
+
+        lastVideoTime = -1;
+        running = true;
+        state = "on";
+
+        console.log("Camera started.");
+
+        animationFrameId = requestAnimationFrame(processFrame);
+
+        return self;
+      })
+
+      .catch(function (err) {
+        console.error("LiveEngine start error:", err);
+
+        state = "error";
+        running = false;
+
+        if (stream) {
+          stream.getTracks().forEach(function (track) {
+            track.stop();
+          });
+
+          stream = null;
+        }
+
+        throw err;
       });
+  };
 
-      canvasEl.width = videoEl.videoWidth || 640;
-      canvasEl.height = videoEl.videoHeight || 480;
+  // ----------------------------------------------------------
+  // Process camera frames
+  // ----------------------------------------------------------
 
-      hands.onResults(function (results) {
-        draw(results);
-        SB.Engine._hands(results.multiHandLandmarks ? results.multiHandLandmarks.length : 0);
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length && classifier) {
-          var lm = results.multiHandLandmarks[0];
-          var feats = landmarkVector(lm);
-          var token = null;
-          try { token = classifier(feats); } catch (e) { console.error("classifier error", e); }
-          if (token) {
-            token.source = "live";
+  function processFrame() {
+    if (!running) {
+      return;
+    }
+
+    if (
+      !holistic ||
+      !videoEl ||
+      videoEl.readyState < 2 ||
+      videoEl.videoWidth === 0
+    ) {
+      animationFrameId = requestAnimationFrame(processFrame);
+      return;
+    }
+
+    // Don't process the exact same frame twice.
+    if (videoEl.currentTime !== lastVideoTime) {
+      lastVideoTime = videoEl.currentTime;
+
+      try {
+        var results = holistic.detectForVideo(
+          videoEl,
+          performance.now()
+        );
+
+        handleResults(results);
+      } catch (err) {
+        console.error("MediaPipe detection error:", err);
+      }
+    }
+
+    animationFrameId = requestAnimationFrame(processFrame);
+  }
+
+  // ----------------------------------------------------------
+  // Handle MediaPipe results
+  // ----------------------------------------------------------
+
+  function handleResults(results) {
+    var leftHand = null;
+    var rightHand = null;
+
+    if (
+      results.leftHandLandmarks &&
+      results.leftHandLandmarks.length > 0
+    ) {
+      leftHand = results.leftHandLandmarks[0];
+    }
+
+    if (
+      results.rightHandLandmarks &&
+      results.rightHandLandmarks.length > 0
+    ) {
+      rightHand = results.rightHandLandmarks[0];
+    }
+
+    // Tell the existing SignBridge engine how many hands exist.
+    var handCount = 0;
+
+    if (leftHand) handCount++;
+    if (rightHand) handCount++;
+
+    if (SB.Engine && SB.Engine._hands) {
+      SB.Engine._hands(handCount);
+    }
+
+    // Draw hand skeletons.
+    if (drawLandmarksEnabled) {
+      draw(leftHand, rightHand);
+    } else {
+      clearCanvas();
+    }
+
+    // Keep the team's existing classifier system working.
+    if (classifier) {
+      var classifierHand = rightHand || leftHand;
+
+      if (classifierHand) {
+        var features = landmarkVector(classifierHand);
+        var token = null;
+
+        try {
+          token = classifier(features);
+        } catch (err) {
+          console.error("Classifier error:", err);
+        }
+
+        if (token) {
+          token.source = "live";
+
+          if (SB.Engine && SB.Engine._result) {
             SB.Engine._result(token);
           }
         }
-      });
+      }
+    }
 
-      camera = new Camera(videoEl, {
-        onFrame: function () { if (hands) hands.send({ image: videoEl }); },
-      });
-      camera.start();
-      running = true;
-      state = "on";
-      return self;
-    }).catch(function (err) {
-      state = "error";
-      if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); }
-      throw err;
-    });
-  };
+    printCoordinates(results, leftHand, rightHand);
+  }
 
-  self.stop = function () {
-    running = false;
-    if (camera) { try { camera.stop(); } catch (e) {} camera = null; }
-    if (hands) { try { hands.close(); } catch (e) {} hands = null; }
-    if (stream) { stream.getTracks().forEach(function (t) { t.stop(); }); stream = null; }
-    state = "off";
-  };
+  // ----------------------------------------------------------
+  // Debug coordinate output
+  // ----------------------------------------------------------
 
-  /* ---- drawing: 21 landmarks + connections ---- */
-  function draw(results) {
+  var lastPrintTime = 0;
+
+  function printCoordinates(results, leftHand, rightHand) {
+    var now = performance.now();
+
+    // Only print twice per second so DevTools doesn't get flooded.
+    if (now - lastPrintTime < 500) {
+      return;
+    }
+
+    lastPrintTime = now;
+
+    if (leftHand) {
+      console.log("LEFT HAND:", leftHand);
+    }
+
+    if (rightHand) {
+      console.log("RIGHT HAND:", rightHand);
+    }
+
+    if (results.poseLandmarks && results.poseLandmarks.length > 0) {
+      var pose = results.poseLandmarks[0];
+
+      console.log("LEFT SHOULDER:", pose[11]);
+      console.log("RIGHT SHOULDER:", pose[12]);
+
+      console.log("LEFT ELBOW:", pose[13]);
+      console.log("RIGHT ELBOW:", pose[14]);
+
+      console.log("LEFT WRIST:", pose[15]);
+      console.log("RIGHT WRIST:", pose[16]);
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Hand skeleton connections
+  // ----------------------------------------------------------
+
+  var HAND_CONNECTIONS = [
+    [0, 1], [1, 2], [2, 3], [3, 4],
+
+    [0, 5], [5, 6], [6, 7], [7, 8],
+
+    [5, 9], [9, 10], [10, 11], [11, 12],
+
+    [9, 13], [13, 14], [14, 15], [15, 16],
+
+    [13, 17], [17, 18], [18, 19], [19, 20],
+
+    [0, 17]
+  ];
+
+  // ----------------------------------------------------------
+  // Clear overlay
+  // ----------------------------------------------------------
+
+  function clearCanvas() {
+    if (!canvasEl) {
+      return;
+    }
+
     var ctx = canvasEl.getContext("2d");
-    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-    if (!results.multiHandLandmarks || !results.multiHandLandmarks.length) return;
 
-    var lm = results.multiHandLandmarks[0];
-    // scale video coords to canvas
-    var vw = videoEl.videoWidth, vh = videoEl.videoHeight;
-    var sx = canvasEl.width / vw, sy = canvasEl.height / vh;
-    var pts = lm.map(function (p) { return { x: p.x * sx, y: p.y * sy }; });
+    ctx.clearRect(
+      0,
+      0,
+      canvasEl.width,
+      canvasEl.height
+    );
+  }
 
-    // connections first (below the joints)
+  // ----------------------------------------------------------
+  // Draw detected hands
+  // ----------------------------------------------------------
+
+  function draw(leftHand, rightHand) {
+    if (!canvasEl || !videoEl) {
+      return;
+    }
+
+    var ctx = canvasEl.getContext("2d");
+
+    ctx.clearRect(
+      0,
+      0,
+      canvasEl.width,
+      canvasEl.height
+    );
+
+    if (leftHand) {
+      drawHand(ctx, leftHand);
+    }
+
+    if (rightHand) {
+      drawHand(ctx, rightHand);
+    }
+  }
+
+  function drawHand(ctx, landmarks) {
+    var points = landmarks.map(function (point) {
+      var x = point.x * canvasEl.width;
+      var y = point.y * canvasEl.height;
+
+      
+
+      return {
+        x: x,
+        y: y
+      };
+    });
+
+    // Draw lines between joints.
     ctx.lineWidth = 3;
     ctx.lineCap = "round";
-    if (window.HAND_CONNECTIONS) {
-      HAND_CONNECTIONS.forEach(function (c) {
-        var a = pts[c[0]], b = pts[c[1]];
-        ctx.strokeStyle = "rgba(52, 224, 192, .55)";
-        ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-      });
-    }
-    // joints on top
-    pts.forEach(function (p, i) {
+    ctx.strokeStyle = "rgba(52, 224, 192, .55)";
+
+    HAND_CONNECTIONS.forEach(function (connection) {
+      var start = points[connection[0]];
+      var end = points[connection[1]];
+
       ctx.beginPath();
-      ctx.arc(p.x, p.y, i === 0 ? 7 : 5, 0, Math.PI * 2);
-      ctx.fillStyle = i === 0 ? "#ffb454" : "#8b8cff";
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    });
+
+    // Draw individual landmark points.
+    points.forEach(function (point, index) {
+      ctx.beginPath();
+
+      ctx.arc(
+        point.x,
+        point.y,
+        index === 0 ? 7 : 5,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fillStyle = index === 0
+        ? "#ffb454"
+        : "#8b8cff";
+
       ctx.fill();
+
       ctx.strokeStyle = "rgba(6,10,20,.8)";
       ctx.lineWidth = 1.5;
       ctx.stroke();
     });
   }
 
-  /* ---- features: 21 × 3, normalized (see contract above) ---- */
-  function landmarkVector(lm) {
-    var wrist = lm[0];
-    var xs = lm.map(function (p) { return p.x; });
-    var ys = lm.map(function (p) { return p.y; });
-    var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
-    var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
-    var span = Math.max(maxX - minX, maxY - minY, 1e-6);
+  // ----------------------------------------------------------
+  // Convert one hand into the existing 63-number format
+  // ----------------------------------------------------------
 
-    var feats = new Float32Array(63);
+  function landmarkVector(landmarks) {
+    var wrist = landmarks[0];
+
+    var xs = landmarks.map(function (point) {
+      return point.x;
+    });
+
+    var ys = landmarks.map(function (point) {
+      return point.y;
+    });
+
+    var minX = Math.min.apply(null, xs);
+    var maxX = Math.max.apply(null, xs);
+
+    var minY = Math.min.apply(null, ys);
+    var maxY = Math.max.apply(null, ys);
+
+    var span = Math.max(
+      maxX - minX,
+      maxY - minY,
+      1e-6
+    );
+
+    var features = new Float32Array(63);
+
     for (var i = 0; i < 21; i++) {
-      feats[i * 3]     = (lm[i].x - minX) / span;
-      feats[i * 3 + 1] = (lm[i].y - minY) / span;
-      feats[i * 3 + 2] = (lm[i].z - wrist.z) / span;
+      features[i * 3] =
+        (landmarks[i].x - minX) / span;
+
+      features[i * 3 + 1] =
+        (landmarks[i].y - minY) / span;
+
+      features[i * 3 + 2] =
+        (landmarks[i].z - wrist.z) / span;
     }
-    return feats;
+
+    return features;
   }
+
+  // ----------------------------------------------------------
+  // Stop camera
+  // ----------------------------------------------------------
+
+  self.stop = function () {
+    running = false;
+
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+
+    if (stream) {
+      stream.getTracks().forEach(function (track) {
+        track.stop();
+      });
+
+      stream = null;
+    }
+
+    if (videoEl) {
+      videoEl.srcObject = null;
+    }
+
+    clearCanvas();
+
+    lastVideoTime = -1;
+    state = "off";
+
+    console.log("Camera stopped.");
+  };
 };
