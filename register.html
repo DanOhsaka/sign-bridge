@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SignBridge — Create account</title>
+  <meta name="description" content="Create a SignBridge account to save your practice progress.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/views.css">
+</head>
+<body data-view="register">
+
+  <div class="app">
+
+    <header class="topbar">
+      <a class="logo" href="index.html" aria-label="SignBridge home">
+        <span class="logo-mark">✋</span>
+        <span>
+          <span class="logo-name">Sign<em>Bridge</em></span>
+          <span class="logo-sub">live sign translator</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a data-nav="translate" href="index.html">Translate</a>
+        <a data-nav="practice" href="practice.html">Practice</a>
+        <a data-nav="learn" href="learn.html">Learn</a>
+      </nav>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
+        <div id="authSlot" class="auth-slot">
+          <a class="chip" href="login.html">Log in</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="view view--auth">
+
+      <section class="card auth-welcome">
+        <div class="demo-hand" aria-hidden="true">✋</div>
+        <h1>Join SignBridge
+          <small>A learning companion, not just a translator.</small>
+        </h1>
+        <p>Create an account so your progress follows you. Then open the signing space, miss a letter on purpose, and watch the machine teach you the pair.</p>
+        <div class="auth-points">
+          <div class="param">
+            <div class="p-name">Your name</div>
+            <div class="p-val">Shows in the top bar so you know whose session this is.</div>
+          </div>
+          <div class="param">
+            <div class="p-name">Your account</div>
+            <div class="p-val">Email and password, saved with your progress.</div>
+          </div>
+          <div class="param">
+            <div class="p-name">Then practice</div>
+            <div class="p-val">Jump into Translate, the arena, or the dictionary.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card auth-form-card">
+        <h2>Create account</h2>
+        <p class="section-sub">Takes a minute. Then the recognizer is waiting.</p>
+
+        <div class="auth-signed-in" id="authSignedIn" hidden>
+          Already signed in as <strong id="authSignedInName"></strong>.
+          <a class="btn btn-soft btn-sm" href="index.html">Continue to Translate</a>
+        </div>
+
+        <form class="auth-form" id="registerForm" novalidate>
+          <div class="field">
+            <label for="regName">Name</label>
+            <input class="input" id="regName" name="name" type="text" autocomplete="name" placeholder="Alex Rivera" maxlength="48" required>
+            <span class="hint field-msg" data-default="How you’ll appear in the top bar.">How you’ll appear in the top bar.</span>
+          </div>
+
+          <div class="field">
+            <label for="regEmail">Email</label>
+            <input class="input" id="regEmail" name="email" type="email" autocomplete="username" placeholder="you@school.edu" required>
+            <span class="hint field-msg"></span>
+          </div>
+
+          <div class="field">
+            <label for="regPassword">Password</label>
+            <div class="input-wrap">
+              <input class="input" id="regPassword" name="password" type="password" autocomplete="new-password" placeholder="8+ characters" required>
+              <button class="icon-btn" type="button" data-toggle-pass="regPassword" title="Show password" aria-label="Show password">👁</button>
+            </div>
+            <div class="conf-meter pw-meter" aria-hidden="true"><div class="conf-fill" id="pwFill" style="width:0%"></div></div>
+            <span class="hint field-msg" id="pwHint" data-default="At least 8 characters, with a letter and a number.">At least 8 characters, with a letter and a number.</span>
+          </div>
+
+          <div class="field">
+            <label for="regConfirm">Confirm password</label>
+            <div class="input-wrap">
+              <input class="input" id="regConfirm" name="confirm" type="password" autocomplete="new-password" placeholder="Type it again" required>
+              <button class="icon-btn" type="button" data-toggle-pass="regConfirm" title="Show password" aria-label="Show password">👁</button>
+            </div>
+            <span class="hint field-msg"></span>
+          </div>
+
+          <button class="btn btn-primary" type="submit">Create account</button>
+        </form>
+
+        <p class="auth-foot">Already have an account? <a href="login.html">Log in</a></p>
+        <p class="auth-note">Use a password you don’t reuse elsewhere. SignBridge will store it hashed on the server.</p>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <script src="js/ui/common.js"></script>
+  <script src="js/views/auth.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

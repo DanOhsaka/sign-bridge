@@ -159,4 +159,6 @@ SB.initCommon = function () {
   SB.$$(".nav a[data-nav]").forEach(function (a) {
     if (a.getAttribute("data-nav") === view) a.classList.add("active");
   });
+
+  if (SB.paintAuthSlot) SB.paintAuthSlot();
 };
