@@ -23,10 +23,16 @@ window.SB = window.SB || {};
     case "learn":
       ctrl = SB.LearnView();
       break;
+    case "login":
+    case "register":
+      ctrl = SB.AuthView();
+      break;
   }
 
   if (ctrl) ctrl.init();
 
-  var settings = SB.SettingsView();
-  settings.bind();
+  if (view !== "login" && view !== "register") {
+    var settings = SB.SettingsView();
+    settings.bind();
+  }
 })();

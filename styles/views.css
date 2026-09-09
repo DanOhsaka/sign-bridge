@@ -404,6 +404,106 @@
 .fact-card p strong { color: var(--text); }
 
 /* ============================================================
+   VIEW: AUTH (login + register)
+   Same two-card arc as Translate: welcome on the left,
+   the form on the right. Surfaces recede; the gradient
+   mark and teal primary action stay the heroes.
+   ============================================================ */
+
+.view--auth {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 1.05fr);
+  gap: 20px;
+  align-items: stretch;
+  max-width: 920px;
+  margin: 28px auto 0;
+}
+
+.auth-welcome {
+  padding: 32px 28px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  background:
+    radial-gradient(120% 80% at 20% 0%, var(--surface-2) 0%, var(--surface) 70%);
+}
+
+.auth-welcome .demo-hand {
+  font-size: 42px; width: 84px; height: 84px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  background: var(--grad-soft);
+  border: 1px solid rgba(139,140,255,.3);
+  animation: floatY 3.4s var(--ease) infinite;
+}
+
+.auth-welcome h1 { font-size: var(--fs-2xl); }
+.auth-welcome h1 small {
+  display: block; font-size: var(--fs-xs); color: var(--text-3);
+  font-weight: 500; margin-top: 6px;
+}
+.auth-welcome > p { color: var(--text-2); font-size: var(--fs-sm); max-width: 38ch; }
+
+.auth-points { display: grid; gap: 8px; margin-top: auto; }
+.auth-points .param { background: var(--surface-2); }
+
+.auth-form-card { padding: 28px 26px; display: flex; flex-direction: column; gap: 4px; }
+.auth-form-card h2 { font-size: var(--fs-xl); margin-bottom: 4px; }
+.auth-form-card .section-sub { margin-bottom: 18px; }
+
+.auth-form { display: flex; flex-direction: column; }
+.auth-form .field { margin-bottom: 14px; }
+.auth-form .btn-primary { width: 100%; padding: 12px 18px; margin-top: 4px; }
+
+.input-wrap { position: relative; display: flex; align-items: center; }
+.input-wrap .input { padding-right: 46px; }
+.input-wrap .icon-btn {
+  position: absolute; right: 6px;
+  width: 32px; height: 32px; font-size: 14px;
+}
+
+.field-msg.is-error { color: var(--red); }
+
+.auth-remember { padding: 2px 0 8px; }
+
+.auth-foot {
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  margin-top: 16px;
+}
+
+.auth-note {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-3);
+}
+
+.auth-signed-in {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 12px; margin-bottom: 16px;
+  border-radius: var(--r-sm);
+  background: var(--teal-soft);
+  border: 1px solid rgba(52,224,192,.3);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+.auth-signed-in strong { color: var(--teal); }
+.auth-signed-in[hidden] { display: none; }
+
+.auth-slot { display: flex; align-items: center; gap: 8px; }
+.auth-user-pill { max-width: 168px; }
+.auth-user-pill .pill-text {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 120px;
+}
+
+.pw-meter { margin-top: 8px; }
+
+/* ============================================================
    RESPONSIVE
    ============================================================ */
 @media (max-width: 1020px) {
@@ -412,11 +512,16 @@
   .params-grid { grid-template-columns: repeat(2, 1fr); }
   .practice-grid { grid-template-columns: 1fr; }
   .letter-pad { grid-template-columns: repeat(9, 1fr); }
+  .view--auth { grid-template-columns: 1fr; max-width: 480px; }
+  .auth-welcome { order: 2; }
+  .auth-form-card { order: 1; }
 }
 
 @media (max-width: 640px) {
   .topbar { gap: 10px; }
   .nav { order: 3; width: 100%; justify-content: center; }
+  .auth-welcome, .auth-form-card { padding: 22px 18px; }
+  .auth-welcome h1 { font-size: var(--fs-xl); }
   .letter-pad { grid-template-columns: repeat(6, 1fr); }
   .spotlight-word { font-size: var(--fs-2xl); }
   .bubble-words { font-size: var(--fs-lg); }

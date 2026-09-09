@@ -36,6 +36,9 @@
         <span class="engine-pill is-demo" id="enginePill"><span class="dot"></span><span class="pill-text">Demo · simulated</span></span>
         <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
         <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+        <div id="authSlot" class="auth-slot">
+          <a class="chip" href="login.html">Log in</a>
+        </div>
       </div>
     </header>
 
@@ -176,6 +179,7 @@
 
   <!-- ══════════ Scripts (order matters — classic scripts, no build step) ══════════ -->
   <script src="js/ui/common.js"></script>
+  <script src="js/views/auth.js"></script>
   <script src="js/data/signs.js"></script>
   <script src="js/ui/transcript.js"></script>
   <script src="js/engine/recognizer.js"></script>

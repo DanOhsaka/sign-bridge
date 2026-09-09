@@ -307,6 +307,7 @@ button { font-family: inherit; }
   outline: none; border-color: var(--teal);
   box-shadow: 0 0 0 3px var(--teal-soft);
 }
+.input.is-error { border-color: var(--red); box-shadow: 0 0 0 3px var(--red-soft); }
 .input::placeholder { color: var(--text-3); }
 
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }

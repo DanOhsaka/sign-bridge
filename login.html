@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SignBridge — Log in</title>
+  <meta name="description" content="Sign in to SignBridge to keep your practice progress.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/main.css">
+  <link rel="stylesheet" href="styles/views.css">
+</head>
+<body data-view="login">
+
+  <div class="app">
+
+    <header class="topbar">
+      <a class="logo" href="index.html" aria-label="SignBridge home">
+        <span class="logo-mark">✋</span>
+        <span>
+          <span class="logo-name">Sign<em>Bridge</em></span>
+          <span class="logo-sub">live sign translator</span>
+        </span>
+      </a>
+      <nav class="nav" aria-label="Main">
+        <a data-nav="translate" href="index.html">Translate</a>
+        <a data-nav="practice" href="practice.html">Practice</a>
+        <a data-nav="learn" href="learn.html">Learn</a>
+      </nav>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
+        <div id="authSlot" class="auth-slot">
+          <a class="chip" href="register.html">Create account</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="view view--auth">
+
+      <section class="card auth-welcome">
+        <div class="demo-hand" aria-hidden="true">✋</div>
+        <h1>Welcome back
+          <small>Pick up where you left the signing space.</small>
+        </h1>
+        <p>Sign in to keep your practice streak, review queue, and settings — then jump straight back to live translate.</p>
+        <div class="auth-points">
+          <div class="param">
+            <div class="p-name">Translate</div>
+            <div class="p-val">Sign → text, with confidence you can see.</div>
+          </div>
+          <div class="param">
+            <div class="p-name">Practice</div>
+            <div class="p-val">Letters, minimal pairs, spaced review.</div>
+          </div>
+          <div class="param">
+            <div class="p-name">Learn</div>
+            <div class="p-val">A dictionary that teaches the trap, not just the sign.</div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card auth-form-card">
+        <h2>Log in</h2>
+        <p class="section-sub">Use the email you registered with.</p>
+
+        <div class="auth-signed-in" id="authSignedIn" hidden>
+          Already signed in as <strong id="authSignedInName"></strong>.
+          <a class="btn btn-soft btn-sm" href="index.html">Continue to Translate</a>
+        </div>
+
+        <form class="auth-form" id="loginForm" novalidate>
+          <div class="field">
+            <label for="loginEmail">Email</label>
+            <input class="input" id="loginEmail" name="email" type="email" autocomplete="username" placeholder="you@school.edu" required>
+            <span class="hint field-msg"></span>
+          </div>
+
+          <div class="field">
+            <label for="loginPassword">Password</label>
+            <div class="input-wrap">
+              <input class="input" id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="Your password" required>
+              <button class="icon-btn" type="button" data-toggle-pass="loginPassword" title="Show password" aria-label="Show password">👁</button>
+            </div>
+            <span class="hint field-msg"></span>
+          </div>
+
+          <div class="toggle-row auth-remember">
+            <span class="lbl">Remember me<small>Stay signed in on this browser.</small></span>
+            <button class="toggle is-on" id="loginRemember" type="button" role="switch" aria-checked="true" aria-label="Remember me"></button>
+          </div>
+
+          <button class="btn btn-primary" type="submit">Log in</button>
+        </form>
+
+        <p class="auth-foot">New here? <a href="register.html">Create an account</a></p>
+        <p class="auth-note">Your password is sent only to SignBridge. We never show it back to you.</p>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+  <script src="js/ui/common.js"></script>
+  <script src="js/views/auth.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
