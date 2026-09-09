@@ -1,0 +1,5 @@
+﻿# Files excluded from the Vercel static host (see docs in README)
+server/
+docs/
+.cursor/
+.gitignore
