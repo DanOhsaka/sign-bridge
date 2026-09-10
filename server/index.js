@@ -1,31 +1,23 @@
 /* ============================================================
-   SignBridge — API + static host
-   Boots Mongo via Database.getInstance() (singleton), then
-   serves the existing HTML/CSS/JS and /api/auth/*.
+   SignBridge — local API + static host
+   Boots Mongo via Database.getInstance(), then serves HTML/CSS/JS
+   and /api/auth/*. On Vercel this file is not used; see /api.
    ============================================================ */
 
 const path = require("path");
 const express = require("express");
-const cors = require("cors");
 require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const Database = require("./db");
-const authRoutes = require("./routes/auth");
+const app = require("./app");
 
 const PORT = Number(process.env.PORT) || 3000;
-const app = express();
 
-app.use(cors());
-app.use(express.json());
-app.use("/api/auth", authRoutes);
 app.use(express.static(path.join(__dirname, "..")));
 
-app.get("/api/health", function (req, res) {
-  var db = Database.getInstance();
-  res.json({ ok: true, db: db.isConnected() ? "connected" : "down" });
-});
-
 async function start() {
+  if (process.env.VERCEL) return;
+
   if (!process.env.JWT_SECRET) {
     throw new Error("JWT_SECRET is missing. Copy server/.env.example to server/.env");
   }
