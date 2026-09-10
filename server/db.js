@@ -2,38 +2,45 @@
    SignBridge — MongoDB connection (singleton)
    One shared client for the whole process. getInstance() always
    returns the same Database; connect() is a no-op if already up.
+   Stored on globalThis so Vercel warm invocations reuse it.
    ============================================================ */
 
 const mongoose = require("mongoose");
 
+const GLOBAL_KEY = "__signbridgeDb";
+
 class Database {
   constructor() {
-    if (Database._instance) {
-      return Database._instance;
+    if (globalThis[GLOBAL_KEY]) {
+      return globalThis[GLOBAL_KEY];
     }
 
     this._conn = null;
     this._connecting = null;
-    Database._instance = this;
+    globalThis[GLOBAL_KEY] = this;
   }
 
   static getInstance() {
-    if (!Database._instance) {
-      Database._instance = new Database();
+    if (!globalThis[GLOBAL_KEY]) {
+      globalThis[GLOBAL_KEY] = new Database();
     }
-    return Database._instance;
+    return globalThis[GLOBAL_KEY];
   }
 
   async connect(uri) {
-    if (this._conn) return this._conn;
+    if (this._conn || mongoose.connection.readyState === 1) {
+      this._conn = this._conn || mongoose.connection;
+      return this._conn;
+    }
     if (this._connecting) return this._connecting;
 
     if (!uri) {
       throw new Error("MONGODB_URI is missing.");
     }
 
-    this._connecting = mongoose.connect(uri).then(function (conn) {
-      return conn;
+    this._connecting = mongoose.connect(uri, {
+      maxPoolSize: 5,
+      serverSelectionTimeoutMS: 10000
     });
 
     try {
@@ -53,7 +60,7 @@ class Database {
   }
 
   async disconnect() {
-    if (!this._conn) return;
+    if (!this._conn && mongoose.connection.readyState === 0) return;
     await mongoose.disconnect();
     this._conn = null;
   }
