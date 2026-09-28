@@ -161,4 +161,7 @@ SB.initCommon = function () {
   });
 
   if (SB.paintAuthSlot) SB.paintAuthSlot();
+
+  /* BeUI + Aceternity decorative layer (no-ops if effects.js not loaded) */
+  if (SB.initEffects) SB.initEffects();
 };

@@ -1,0 +1,336 @@
+/* ============================================================
+   SignBridge — BeUI + Aceternity pattern layer
+   Ported visual/motion patterns for the vanilla stack
+   (React libraries require a build step; these mirror their
+   official looks while preserving SignBridge tokens & IDs).
+   Sources: beui.dev · ui.aceternity.com
+   ============================================================ */
+
+/* ---------- Aceternity: Spotlight (hero glow) ---------- */
+.ac-spotlight {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+}
+.ac-spotlight::before {
+  content: "";
+  position: absolute;
+  width: 140vmax;
+  height: 140vmax;
+  left: 50%;
+  top: -20%;
+  transform: translate(-50%, -40%) scale(1);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(52, 224, 192, 0.18) 0%,
+    rgba(139, 140, 255, 0.10) 32%,
+    transparent 58%
+  );
+  animation: acSpotlightIn 1.6s cubic-bezier(.22, .8, .32, 1) .2s both;
+}
+[data-theme="light"] .ac-spotlight::before {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(14, 159, 134, 0.14) 0%,
+    rgba(91, 91, 214, 0.08) 32%,
+    transparent 58%
+  );
+}
+@keyframes acSpotlightIn {
+  from { opacity: 0; transform: translate(-72%, -62%) scale(0.5); }
+  to   { opacity: 1; transform: translate(-50%, -40%) scale(1); }
+}
+
+/* ---------- Aceternity: Background Beams (SVG paths) ---------- */
+.ac-beams {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0.55;
+}
+.ac-beams svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+}
+.ac-beams path {
+  fill: none;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-dasharray: 8 22;
+  animation: acBeamDrift 14s linear infinite;
+}
+.ac-beams path:nth-child(odd)  { stroke: rgba(52, 224, 192, 0.35); animation-duration: 11s; }
+.ac-beams path:nth-child(even) { stroke: rgba(139, 140, 255, 0.32); animation-duration: 16s; animation-direction: reverse; }
+[data-theme="light"] .ac-beams path:nth-child(odd)  { stroke: rgba(14, 159, 134, 0.28); }
+[data-theme="light"] .ac-beams path:nth-child(even) { stroke: rgba(91, 91, 214, 0.24); }
+@keyframes acBeamDrift {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -240; }
+}
+
+/* Keep app content above effects */
+.app, .drawer-backdrop, .drawer, .toast-wrap {
+  position: relative;
+  z-index: 1;
+}
+.drawer-backdrop { z-index: 60; }
+.drawer { z-index: 61; }
+.toast-wrap { z-index: 90; }
+
+/* ---------- Aceternity: Hero highlight / text shimmer ---------- */
+.ac-text-shimmer {
+  background: linear-gradient(
+    110deg,
+    var(--text) 0%,
+    var(--teal) 35%,
+    var(--violet) 55%,
+    var(--text) 75%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: acShimmer 5.5s ease-in-out infinite;
+}
+@keyframes acShimmer {
+  0%, 100% { background-position: 100% 50%; }
+  50% { background-position: 0% 50%; }
+}
+
+/* ---------- Aceternity: Wobble / glare cards ---------- */
+.ac-wobble {
+  transform-style: preserve-3d;
+  will-change: transform;
+  transition: transform 180ms cubic-bezier(.22, .8, .32, 1), box-shadow var(--t-med) var(--ease);
+}
+.ac-wobble.is-tilting {
+  transition: none;
+}
+.ac-glare {
+  position: relative;
+  overflow: hidden;
+}
+.ac-glare::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(
+    circle at var(--gx, 50%) var(--gy, 50%),
+    rgba(255, 255, 255, 0.16) 0%,
+    transparent 42%
+  );
+  opacity: 0;
+  transition: opacity 220ms var(--ease);
+  mix-blend-mode: soft-light;
+}
+.ac-glare:hover::after { opacity: 1; }
+
+/* Soft glass surface on primary cards (Aceternity glass + BeUI surface) */
+.card.ac-glass {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ---------- BeUI: Spring-pressed / magnetic buttons ---------- */
+.btn, .chip, .icon-btn, .letter-pad button, .alt-btn {
+  --press: 1;
+  transform: scale(var(--press)) translateY(var(--lift, 0px));
+  transition:
+    transform 180ms cubic-bezier(.34, 1.4, .64, 1),
+    box-shadow var(--t-fast) var(--ease),
+    background var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast);
+}
+.btn:active, .chip:active, .icon-btn:active, .letter-pad button:active {
+  --press: 0.94;
+}
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+}
+.btn-primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 20%, rgba(255,255,255,.28) 48%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform .55s var(--ease);
+}
+.btn-primary:hover::before { transform: translateX(120%); }
+.btn-primary:hover { --lift: -2px; box-shadow: var(--glow-teal); }
+.btn-ghost:hover, .btn-soft:hover { --lift: -1px; }
+
+.be-magnetic {
+  will-change: transform;
+}
+
+/* ---------- BeUI: Tabs / segmented gliding pill ---------- */
+.nav, .segmented {
+  position: relative;
+}
+.nav .be-pill,
+.segmented .be-pill {
+  position: absolute;
+  z-index: 0;
+  border-radius: 999px;
+  background: var(--grad);
+  box-shadow: var(--shadow-1);
+  transition:
+    left 280ms cubic-bezier(.34, 1.35, .64, 1),
+    top 280ms cubic-bezier(.34, 1.35, .64, 1),
+    width 280ms cubic-bezier(.34, 1.35, .64, 1),
+    height 280ms cubic-bezier(.34, 1.35, .64, 1),
+    opacity 180ms var(--ease);
+  pointer-events: none;
+  opacity: 0;
+}
+.nav .be-pill.is-ready,
+.segmented .be-pill.is-ready { opacity: 1; }
+.nav a, .segmented button {
+  position: relative;
+  z-index: 1;
+}
+.nav a.active {
+  background: transparent !important;
+  color: #04121a !important;
+  box-shadow: none !important;
+}
+[data-theme="light"] .nav a.active { color: #fff !important; }
+.segmented button.is-on {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ---------- BeUI: Glass topbar ---------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  margin-left: -8px;
+  margin-right: -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  border-bottom: 1px solid var(--border);
+}
+
+.logo-mark {
+  transition: transform 320ms cubic-bezier(.34, 1.4, .64, 1), box-shadow var(--t-med);
+}
+.logo:hover .logo-mark {
+  transform: rotate(-8deg) scale(1.06);
+  box-shadow: var(--glow-teal);
+}
+
+/* ---------- BeUI: Spring toggle + drawer ---------- */
+.toggle {
+  transition: background 220ms cubic-bezier(.34, 1.35, .64, 1), border-color var(--t-fast);
+}
+.toggle::after {
+  transition:
+    transform 280ms cubic-bezier(.34, 1.5, .64, 1),
+    background 180ms var(--ease),
+    width 180ms var(--ease);
+}
+.toggle:active::after { width: 22px; }
+.toggle.is-on:active::after { transform: translateX(16px); }
+
+.drawer {
+  transition: transform 380ms cubic-bezier(.32, 1.15, .45, 1);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.drawer-backdrop {
+  backdrop-filter: blur(6px) saturate(1.1);
+  -webkit-backdrop-filter: blur(6px) saturate(1.1);
+}
+
+/* ---------- BeUI: Stacked toasts ---------- */
+.toast-wrap {
+  gap: 10px;
+}
+.toast {
+  animation: beToastIn 360ms cubic-bezier(.34, 1.4, .64, 1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--surface-3) 88%, transparent);
+}
+@keyframes beToastIn {
+  from { opacity: 0; transform: translateY(18px) scale(.92); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- Aceternity: Stage ambient grid ---------- */
+.stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(151, 168, 205, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(151, 168, 205, 0.06) 1px, transparent 1px);
+  background-size: 36px 36px;
+  mask-image: radial-gradient(ellipse at 50% 40%, black 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, black 20%, transparent 75%);
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.7;
+}
+.stage-demo, .stage video, .stage canvas { z-index: 1; }
+
+/* Spotlight recognition panel — stronger Aceternity card feel */
+#spotlight.ac-glare {
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, var(--border));
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--teal-soft) 55%, var(--surface)) 0%, var(--surface) 55%);
+}
+
+/* Learn / phrase cards get subtle edge glow on hover */
+.sign-card.ac-wobble:hover,
+.phrase-card.ac-wobble:hover,
+.fact-card.ac-glare:hover {
+  border-color: color-mix(in srgb, var(--teal) 35%, var(--border-strong));
+  box-shadow: var(--shadow-2), 0 0 0 1px color-mix(in srgb, var(--teal) 18%, transparent);
+}
+
+/* Auth form card — gradient border frame */
+.auth-form-card.ac-glass {
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px color-mix(in srgb, var(--teal) 20%, transparent),
+    0 20px 60px -30px rgba(52, 224, 192, 0.25);
+}
+
+/* Engine pill pulse polish */
+.engine-pill {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* Reduced motion: kill decorative motion, keep layout */
+@media (prefers-reduced-motion: reduce) {
+  .ac-spotlight::before,
+  .ac-beams path,
+  .ac-text-shimmer,
+  .logo-mark,
+  .toast {
+    animation: none !important;
+  }
+  .ac-wobble { transform: none !important; }
+  .nav .be-pill, .segmented .be-pill { transition: none !important; }
+}
