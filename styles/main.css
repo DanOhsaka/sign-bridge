@@ -54,9 +54,9 @@
   --glow-teal: 0 0 0 1px rgba(52,224,192,.25), 0 8px 30px -8px rgba(52,224,192,.35);
   --glow-violet: 0 0 0 1px rgba(139,140,255,.25), 0 8px 30px -8px rgba(139,140,255,.35);
 
-  /* Type */
-  --font-body: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-display: "Space Grotesk", "Inter", system-ui, sans-serif;
+  /* Type — Outfit + Space Grotesk (avoid generic Inter/system stacks) */
+  --font-body: "Outfit", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-display: "Space Grotesk", "Outfit", system-ui, sans-serif;
   --fs-xs: 12px;
   --fs-sm: 13.5px;
   --fs-md: 15px;
