@@ -425,7 +425,7 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
 
 /* Letter pad: larger touch targets */
 .letter-pad {
-  grid-template-columns: repeat(9, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 8px;
 }
 .letter-pad button {
