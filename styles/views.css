@@ -36,7 +36,7 @@
 /* The signing space */
 .stage {
   position: relative;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
   background:
     radial-gradient(ellipse 100% 80% at 50% 100%, rgba(45,212,191,.04) 0%, transparent 70%),
     var(--surface-2);
