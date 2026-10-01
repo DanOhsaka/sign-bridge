@@ -1,38 +1,28 @@
 /* ============================================================
    SignBridge — Practice view (practice.js)
-   ------------------------------------------------------------
-   Pedagogy at work:
-
-     • LETTERS run on spaced practice — letters you miss go on
-       the review list and are served again, until they leave.
-     • Every miss shows the MINIMAL PAIR: "S has the thumb
-       wrapped OVER the fingers — check you're not doing T."
-       Error + explanation = the strongest learning moment.
-     • The arena always shows the four phonological parameters
-       (handshape · orientation · location · movement), the same
-       lens a teacher corrects with.
-     • The simulated recognizer mirrors real near-misses
-       (A/S/T, U/V, M/N…) so students learn the confusions the
-       actual model will later have.
-
-   Input today: keyboard / letter pad (demo engine). When the
-   real classifier plugs in (SB.LiveEngine.setClassifier), the
-   same arena can score real webcam signing — the UI already
-   speaks tokens, not keys.
+   UX polish: reserved feedback, delayed next, try-again,
+   animated stats, clearer pad semantics.
    ============================================================ */
 
 window.SB = window.SB || {};
 
 SB.PracticeView = function () {
   var progress = SB.store.get("progress", {
-    letters: {},      // { A: {tried, n, correct} }
-    review: [],       // letters to re-drill
-    phrases: {},      // { id: {tried, n} }
+    letters: {},
+    review: [],
+    phrases: {},
     streak: 0,
     best: 0,
   });
 
-  var state = { tab: "letters", target: null, sessionCorrect: 0, sessionTried: 0 };
+  var state = {
+    tab: "letters",
+    target: null,
+    sessionCorrect: 0,
+    sessionTried: 0,
+    locked: false,
+    nextTimer: null,
+  };
 
   function save() { SB.store.set("progress", progress); }
 
@@ -44,10 +34,10 @@ SB.PracticeView = function () {
     bindReview();
     bindPhraseDeck();
     renderMinipairs();
+    resetFeedbackIdle();
     updateStats();
   }
 
-  /* ---------- minimal-pairs cheat sheet ---------- */
   function renderMinipairs() {
     var list = SB.$("#minipairList");
     if (!list) return;
@@ -61,7 +51,6 @@ SB.PracticeView = function () {
     });
   }
 
-  /* ---------- tabs ---------- */
   function bindTabs() {
     SB.$$("#practiceTabs button").forEach(function (btn) {
       btn.addEventListener("click", function () {
@@ -74,9 +63,16 @@ SB.PracticeView = function () {
     });
   }
 
-  /* ---------- arena ---------- */
+  function clearNextTimer() {
+    if (state.nextTimer) {
+      clearTimeout(state.nextTimer);
+      state.nextTimer = null;
+    }
+  }
+
   function pickTarget() {
-    /* review letters get priority — spaced repetition */
+    clearNextTimer();
+    state.locked = false;
     if (progress.review.length) {
       state.target = progress.review[0];
     } else {
@@ -85,6 +81,8 @@ SB.PracticeView = function () {
       state.target = pool[Math.floor(Math.random() * pool.length)].l;
     }
     renderTarget();
+    resetFeedbackIdle();
+    updateStats();
   }
 
   function renderTarget() {
@@ -92,18 +90,25 @@ SB.PracticeView = function () {
     var arena = SB.$("#arenaTarget");
     arena.className = "arena-target";
     SB.$("#targetLetter").textContent = info.l;
+    var title = SB.$("#targetTitle");
+    if (title) title.textContent = info.l;
     SB.$("#targetDesc").textContent = info.tip;
     SB.$("#pShape").textContent = info.shape;
     SB.$("#pOrient").textContent = info.orient;
     SB.$("#pLoc").textContent = info.loc;
     SB.$("#pMove").textContent = info.move;
 
-    /* highlight the target on the pad */
     SB.$$("#letterPad button").forEach(function (b) {
       b.classList.toggle("is-target", b.dataset.l === info.l);
+      b.classList.remove("is-correct");
     });
+  }
 
-    SB.$("#feedback").className = "feedback";
+  function resetFeedbackIdle() {
+    var fb = SB.$("#feedback");
+    if (!fb) return;
+    fb.className = "feedback";
+    fb.innerHTML = "<div><strong>Waiting for your answer…</strong><p>Press the matching letter on your keyboard, or tap the pad below.</p></div>";
   }
 
   function showFeedback(kind, html) {
@@ -112,13 +117,23 @@ SB.PracticeView = function () {
     fb.innerHTML = html;
   }
 
-  /* ---------- signing a letter (the core loop) ---------- */
+  function bumpStat(id) {
+    var el = SB.$(id);
+    if (!el) return;
+    el.classList.remove("is-bump");
+    void el.offsetWidth;
+    el.classList.add("is-bump");
+    setTimeout(function () { el.classList.remove("is-bump"); }, 240);
+  }
+
   function sign(letter) {
+    if (state.locked || state.tab !== "letters") return;
     var target = state.target;
     progress.letters[letter] = progress.letters[letter] || { tried: 0, n: 0, correct: 0 };
     progress.letters[letter].tried++;
     progress.letters[letter].n++;
     state.sessionTried++;
+    state.locked = true;
 
     SB.Engine.signLetter(letter, function (tok) {
       var got = tok.text;
@@ -126,47 +141,68 @@ SB.PracticeView = function () {
       var arena = SB.$("#arenaTarget");
 
       if (got === target) {
-        /* correct — possibly with a confidence wobble (near-miss) */
         progress.letters[letter].correct++;
         state.sessionCorrect++;
         progress.streak++;
         progress.best = Math.max(progress.best, progress.streak);
         arena.classList.add("is-correct");
-        showFeedback("correct",
-          "<span class='fb-ico'>🎉</span><div><strong>" + target + " — nice!</strong>" +
-          "<p>" + (tok.conf < 0.85
-            ? "The recognizer caught it at " + SB.confPct(tok.conf) + " — that's the near-miss zone. Practice this handshape once more later."
-            : "The recognizer read it at " + SB.confPct(tok.conf) + ". Strong, clear handshape.") + "</p></div>");
-        if (padBtn) { padBtn.classList.remove("is-miss"); padBtn.classList.add("is-target"); }
-        /* review letters leave the list when mastered */
-        if (progress.review.length) {
-          progress.review.shift();
-          save();
+        if (padBtn) {
+          padBtn.classList.remove("is-miss");
+          padBtn.classList.add("is-correct");
         }
-        setTimeout(pickTarget, 900);
+        showFeedback("correct",
+          "<span class='fb-ico'>✓</span><div><strong>Correct — " + target + "</strong>" +
+          "<p>" + (tok.conf < 0.85
+            ? "Caught at " + SB.confPct(tok.conf) + " (near-miss zone). Practice this handshape again later."
+            : "Read at " + SB.confPct(tok.conf) + ". Clear handshape.") +
+          "</p></div>");
+        if (progress.review.length && progress.review[0] === target) {
+          progress.review.shift();
+        }
+        save();
+        updateStats();
+        bumpStat("#statStreak");
+        state.nextTimer = setTimeout(pickTarget, SB.settings.reduceMotion ? 200 : 700);
       } else {
-        /* missed — teach the difference, add to review */
         progress.streak = 0;
         var info = SB.LETTER_MAP[target];
         var confs = (SB.CONFUSIONS[target] || []).slice(0, 3);
-        var gotName = SB.LETTER_MAP[got] ? " — read as " + got : "";
         if (padBtn) padBtn.classList.add("is-miss");
         arena.classList.add("is-wrong");
         showFeedback("missed",
-          "<span class='fb-ico'>💡</span><div><strong>Near-miss: the recognizer read " + got + gotName + "</strong>" +
+          "<span class='fb-ico'>✕</span><div><strong>Not quite — read as " + got + "</strong>" +
           "<p>Check the handshape. <em>" + info.tip + "</em></p>" +
-          (confs.length ? "<p>Commonly confused with: <strong>" + confs.join(" · ") + "</strong>. Feel the difference, then try again.</p>" : "") +
-          "</div>");
+          (confs.length ? "<p>Often confused with: <strong>" + confs.join(" · ") + "</strong>.</p>" : "") +
+          "<div class='fb-actions'>" +
+          "<button type='button' class='btn btn-soft btn-sm' data-retry>Try again</button>" +
+          "<button type='button' class='btn btn-ghost btn-sm' data-next>Next letter</button>" +
+          "</div></div>");
         if (progress.review.indexOf(target) === -1) progress.review.push(target);
         save();
-        setTimeout(function () { arena.classList.remove("is-wrong"); }, 500);
-        setTimeout(pickTarget, 1600);
+        updateStats();
+        setTimeout(function () { arena.classList.remove("is-wrong"); }, 450);
+
+        var retry = SB.$("[data-retry]", SB.$("#feedback"));
+        var next = SB.$("[data-next]", SB.$("#feedback"));
+        if (retry) {
+          retry.addEventListener("click", function () {
+            state.locked = false;
+            arena.className = "arena-target";
+            resetFeedbackIdle();
+            SB.$$("#letterPad button").forEach(function (b) {
+              b.classList.toggle("is-target", b.dataset.l === target);
+            });
+          });
+        }
+        if (next) {
+          next.addEventListener("click", function () { pickTarget(); });
+        }
+        /* unlock after miss so try-again works; don't auto-advance */
+        state.locked = false;
       }
-      updateStats();
     });
   }
 
-  /* ---------- input: pad + keyboard ---------- */
   function bindPad() {
     var pad = SB.$("#letterPad");
     pad.innerHTML = "";
@@ -175,6 +211,7 @@ SB.PracticeView = function () {
       btn.type = "button";
       btn.dataset.l = e.l;
       btn.textContent = e.l;
+      btn.setAttribute("aria-label", "Sign letter " + e.l);
       btn.title = e.l + " — " + e.shape;
       btn.addEventListener("click", function () { sign(e.l); });
       pad.appendChild(btn);
@@ -184,20 +221,21 @@ SB.PracticeView = function () {
   function bindKeyboard() {
     document.addEventListener("keydown", function (e) {
       if (state.tab !== "letters") return;
-      if (e.target.tagName === "INPUT") return;
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
       var k = e.key.toUpperCase();
-      if (/^[A-Z]$/.test(k)) sign(k);
-      else if (/^[0-9]$/.test(k)) sign(k); // numbers 1–8 are letters in ASL too
+      if (/^[A-Z]$/.test(k)) {
+        e.preventDefault();
+        sign(k);
+      }
     });
   }
 
-  /* ---------- review list ---------- */
   function bindReview() {
     var list = SB.$("#reviewList");
     function render() {
       list.innerHTML = "";
       if (!progress.review.length) {
-        list.innerHTML = '<div class="empty"><div class="empty-icon">🧘</div>No letters in review — you\'re nailing it.</div>';
+        list.innerHTML = '<div class="empty" style="min-height:120px"><div class="empty-icon">✓</div><div class="empty-title">Review clear</div><div class="empty-hint">Missed letters show up here until you master them.</div></div>';
         return;
       }
       progress.review.forEach(function (l) {
@@ -212,22 +250,20 @@ SB.PracticeView = function () {
       });
     }
     render();
-    /* re-render after each round via the ring update path */
     SB.PracticeView._rerenderReview = render;
   }
 
-  /* ---------- stats + progress ring ---------- */
   function updateStats() {
     var tried = progress.letters[state.target] ? progress.letters[state.target].n : 0;
     var correct = progress.letters[state.target] ? progress.letters[state.target].correct : 0;
     SB.$("#statLetter").textContent = state.target;
     SB.$("#statLetterNote").textContent = tried ? Math.round(correct / tried * 100) + "% on " + state.target : "first try";
-    SB.$("#statStreak").innerHTML = progress.streak + (progress.streak ? " <em>🔥</em>" : "");
-    SB.$("#statBest").textContent = progress.best;
+    SB.$("#statStreak").textContent = String(progress.streak);
+    SB.$("#statBest").textContent = String(progress.best);
 
     var ringFg = SB.$("#ringFg");
     var pct = state.sessionTried ? state.sessionCorrect / state.sessionTried : 0;
-    var C = 283; // 2πr
+    var C = 283;
     ringFg.style.strokeDashoffset = C * (1 - pct);
     SB.$("#ringPct").textContent = Math.round(pct * 100) + "%";
     SB.$("#ringNote").textContent = state.sessionCorrect + " / " + state.sessionTried + " this session";
@@ -235,7 +271,6 @@ SB.PracticeView = function () {
     if (SB.PracticeView._rerenderReview) SB.PracticeView._rerenderReview();
   }
 
-  /* ---------- phrases deck ---------- */
   function bindPhraseDeck() {
     var deck = SB.$("#phraseDeck");
     deck.innerHTML = "";
@@ -243,10 +278,10 @@ SB.PracticeView = function () {
       var card = document.createElement("div");
       card.className = "phrase-card";
       card.innerHTML =
-        '<div class="pc-top"><span class="pc-glyph">' + p.emoji + "</span><h4>" + p.name + "</h4>" +
-        '<span class="badge badge-violet pc-cat">' + p.cat + "</span></div>" +
+        '<div class="pc-top"><span class="pc-glyph">' + p.emoji + "</span><h4>" + p.name + "</h4></div>" +
         "<p>" + p.desc + "</p>" +
-        '<div class="pc-actions"><button class="btn btn-soft btn-sm">🤟 Practice</button></div>';
+        '<div class="pc-actions"><span class="badge badge-cat">' + p.cat + "</span>" +
+        '<button class="btn btn-soft btn-sm">Practice</button></div>';
       var btn = card.querySelector(".pc-actions .btn");
       btn.addEventListener("click", function () {
         btn.disabled = true;
@@ -259,7 +294,7 @@ SB.PracticeView = function () {
           progress.phrases[p.id].n++;
           save();
           btn.disabled = false;
-          SB.toast("Practiced \"" + p.name + "\" — repeat it until it feels smooth", "ok");
+          SB.toast("Practiced \"" + p.name + "\"", "ok");
         });
       });
       deck.appendChild(card);

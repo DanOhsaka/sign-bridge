@@ -1,13 +1,6 @@
 /* ============================================================
    SignBridge — Learn view (learn.js)
-   ------------------------------------------------------------
-   A searchable sign dictionary + the communication guide.
-
-   "Show me" streams the sign through the recognizer into a
-   mini transcript — so learners map NAME ↔ RECOGNIZED OUTPUT
-   without leaving the page. The same cards will later hold
-   video of the sign; the data model (SB.PHRASES) already has
-   the slot for it.
+   Cleaner card hierarchy: title → description → meta + action
    ============================================================ */
 
 window.SB = window.SB || {};
@@ -31,6 +24,7 @@ SB.LearnView = function () {
     wrap.innerHTML = "";
     cats.forEach(function (c) {
       var chip = document.createElement("button");
+      chip.type = "button";
       chip.className = "chip" + (c === "All" ? " is-on" : "");
       chip.dataset.cat = c;
       chip.textContent = c;
@@ -65,18 +59,26 @@ SB.LearnView = function () {
     });
 
     if (!items.length) {
-      grid.innerHTML = '<div class="empty" style="grid-column:1/-1"><div class="empty-icon">🔍</div>No signs match — try a different word.</div>';
+      grid.innerHTML =
+        '<div class="empty" style="grid-column:1/-1">' +
+        '<div class="empty-icon">⌕</div>' +
+        '<div class="empty-title">No signs match</div>' +
+        '<div class="empty-hint">Try another search term, or clear the category filter.</div>' +
+        "</div>";
       return;
     }
 
     items.forEach(function (p) {
-      var card = document.createElement("div");
+      var card = document.createElement("article");
       card.className = "sign-card anim-rise";
       card.innerHTML =
-        '<div class="sc-top"><span class="sc-glyph">' + p.emoji + "</span><h4>" + p.name + "</h4>" +
-        '<span class="badge badge-violet sc-cat">' + p.cat + "</span></div>" +
+        '<div class="sc-top"><span class="sc-glyph" aria-hidden="true">' + p.emoji + "</span>" +
+        "<h4>" + p.name + "</h4></div>" +
         '<p class="sc-desc">' + p.desc + "</p>" +
-        '<div class="sc-actions"><button class="btn btn-soft btn-sm" data-show>🤟 Show me</button></div>';
+        '<div class="sc-foot">' +
+        '<span class="badge badge-cat sc-cat">' + p.cat + "</span>" +
+        '<div class="sc-actions"><button type="button" class="btn btn-soft btn-sm" data-show>Practice →</button></div>' +
+        "</div>";
       card.querySelector("[data-show]").addEventListener("click", function () {
         var box = SB.$("#tryTranscript");
         box.classList.add("is-show");
@@ -84,10 +86,8 @@ SB.LearnView = function () {
         SB.Engine.signPhrase(p.id, function (tok) {
           var w = document.createElement("span");
           w.className = "word " + SB.confClass(tok.conf);
-          w.textContent = tok.glyph ? tok.glyph + " " : "" + tok.text;
+          w.textContent = (tok.glyph ? tok.glyph + " " : "") + tok.text;
           box.appendChild(w);
-        }).then(function () {
-          /* end of utterance: leave the words visible */
         });
       });
       grid.appendChild(card);

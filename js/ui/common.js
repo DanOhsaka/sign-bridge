@@ -42,10 +42,15 @@ SB.settings = Object.assign({}, SB.DEFAULTS, SB.store.get("settings", {}));
 SB.saveSettings = function () { SB.store.set("settings", SB.settings); };
 
 /* ---------- Theme ---------- */
-SB.applyTheme = function () {
+SB.resolveTheme = function () {
   var pref = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  var theme = SB.settings.theme === "auto" ? pref : SB.settings.theme;
+  return SB.settings.theme === "auto" ? pref : SB.settings.theme;
+};
+
+SB.applyTheme = function () {
+  var theme = SB.resolveTheme();
   document.documentElement.setAttribute("data-theme", theme);
+  document.documentElement.classList.toggle("reduce-motion", !!SB.settings.reduceMotion);
   SB._positionThemePill(theme);
 };
 
@@ -174,6 +179,15 @@ SB.initCommon = function () {
     window.addEventListener("resize", function () { SB.applyTheme(); });
   }
 
+  /* Ensure every page has a sliding nav pill */
+  var navEl = SB.$(".nav");
+  if (navEl && !SB.$("#navPill", navEl)) {
+    var pillEl = document.createElement("div");
+    pillEl.className = "nav-pill";
+    pillEl.id = "navPill";
+    navEl.insertBefore(pillEl, navEl.firstChild);
+  }
+
   /* nav sliding pill */
   SB._movePill = function () {
     var active = SB.$(".nav a.active");
@@ -185,8 +199,25 @@ SB.initCommon = function () {
     pill.style.left  = (ar.left - nr.left) + "px";
     pill.style.width = ar.width + "px";
   };
-  setTimeout(SB._movePill, 100);
+  requestAnimationFrame(function () {
+    SB._movePill();
+    setTimeout(SB._movePill, 80);
+  });
   window.addEventListener("resize", SB._movePill);
+
+  /* Soft MPA navigation via View Transitions when available */
+  SB.$$(".nav a[data-nav], .logo").forEach(function (a) {
+    a.addEventListener("click", function (e) {
+      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank") return;
+      if (!document.startViewTransition) return;
+      var href = a.getAttribute("href");
+      if (!href || href.charAt(0) === "#") return;
+      e.preventDefault();
+      document.startViewTransition(function () {
+        window.location.href = a.href;
+      });
+    });
+  });
 
   /* segmented mode-switch track */
   SB._moveSegTrack = function () {

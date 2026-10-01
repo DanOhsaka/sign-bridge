@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
   <title>SignBridge — Practice</title>
   <meta name="description" content="SignBridge practice arena — letters, minimal pairs, spaced review.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
@@ -11,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/views.css">
+  <link rel="stylesheet" href="styles/polish.css">
 </head>
 <body data-view="practice">
 
@@ -25,9 +27,10 @@
         </span>
       </a>
       <nav class="nav" aria-label="Main">
-        <a data-nav="translate" href="index.html">Translate</a>
-        <a data-nav="practice" href="practice.html">Practice</a>
-        <a data-nav="learn" href="learn.html">Learn</a>
+        <div class="nav-pill" id="navPill"></div>
+        <a data-nav="translate" href="index.html" title="Live sign → text">Translate</a>
+        <a data-nav="practice" href="practice.html" title="Test your signing skills">Practice</a>
+        <a data-nav="learn" href="learn.html" title="Explore ASL vocabulary">Learn</a>
       </nav>
       <div class="topbar-actions">
         <!-- Sliding dark/light theme switcher -->
@@ -75,10 +78,12 @@
               </div>
             </div>
 
-            <div class="feedback" id="feedback" role="status"></div>
+            <div class="feedback" id="feedback" role="status">
+              <div><strong>Waiting for your answer…</strong><p>Press the matching letter on your keyboard, or tap the pad below.</p></div>
+            </div>
 
             <div>
-              <div class="q-label" style="margin-bottom:8px">Letter pad — click or press the key</div>
+              <div class="q-label" style="margin-bottom:8px">Letter pad — click or press the matching key on your keyboard</div>
               <div class="letter-pad" id="letterPad"></div>
             </div>
           </div>
@@ -120,11 +125,16 @@
           </div>
         </div>
 
-        <div class="card card-pad" style="margin-top:20px">
-          <div class="section-title" style="font-size:16px">Minimal pairs — the classic confusion traps</div>
-          <p class="section-sub">These look almost identical. The recognizer gets them wrong too — which is why the UI teaches them.</p>
-          <div class="minipair-list" id="minipairList"></div>
-        </div>
+        <details class="help-panel">
+          <summary>
+            Need help? Confusing letter pairs
+            <small>Compare look-alikes like J vs Z →</small>
+          </summary>
+          <div class="help-body">
+            <p class="section-sub" style="margin-bottom:12px">These look almost identical. The recognizer gets them wrong too — which is why practice teaches them.</p>
+            <div class="minipair-list" id="minipairList"></div>
+          </div>
+        </details>
       </div>
 
       <!-- ══════════ Phrases pane ══════════ -->

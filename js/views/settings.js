@@ -55,6 +55,7 @@ SB.SettingsView = function () {
       SB.settings[key] = !SB.settings[key];
       SB.saveSettings();
       syncForm();
+      if (key === "reduceMotion") SB.applyTheme();
     });
   }
 
