@@ -75,6 +75,20 @@ SB.LiveEngine = function () {
     return state;
   };
 
+  /* Runtime toggles (Translate chips / settings) */
+  self.setDrawLandmarks = function (on) {
+    drawLandmarksEnabled = !!on;
+    if (!drawLandmarksEnabled) clearCanvas();
+  };
+
+  self.setMirror = function (on) {
+    mirror = !!on;
+  };
+
+  self.getDrawLandmarks = function () {
+    return drawLandmarksEnabled;
+  };
+
   // ----------------------------------------------------------
   // Start camera
   // ----------------------------------------------------------
@@ -145,8 +159,7 @@ SB.LiveEngine = function () {
       })
 
       .then(function () {
-        canvasEl.width = videoEl.videoWidth || 640;
-        canvasEl.height = videoEl.videoHeight || 480;
+        syncCanvasSize();
 
         lastVideoTime = -1;
         running = true;
@@ -338,6 +351,21 @@ SB.LiveEngine = function () {
   ];
 
   // ----------------------------------------------------------
+  // Keep canvas bitmap size in sync with the displayed video box
+  // so landmarks stay aligned under object-fit / responsive layout.
+  // ----------------------------------------------------------
+
+  function syncCanvasSize() {
+    if (!canvasEl || !videoEl) return;
+    var w = videoEl.clientWidth || videoEl.videoWidth || 640;
+    var h = videoEl.clientHeight || videoEl.videoHeight || 480;
+    if (canvasEl.width !== w || canvasEl.height !== h) {
+      canvasEl.width = w;
+      canvasEl.height = h;
+    }
+  }
+
+  // ----------------------------------------------------------
   // Clear overlay
   // ----------------------------------------------------------
 
@@ -365,6 +393,8 @@ SB.LiveEngine = function () {
       return;
     }
 
+    syncCanvasSize();
+
     var ctx = canvasEl.getContext("2d");
 
     ctx.clearRect(
@@ -384,16 +414,15 @@ SB.LiveEngine = function () {
   }
 
   function drawHand(ctx, landmarks) {
+    var w = canvasEl.width;
+    var h = canvasEl.height;
+
     var points = landmarks.map(function (point) {
-      var x = point.x * canvasEl.width;
-      var y = point.y * canvasEl.height;
-
-      
-
-      return {
-        x: x,
-        y: y
-      };
+      var x = point.x * w;
+      var y = point.y * h;
+      /* Mirror overlay to match CSS-mirrored video */
+      if (mirror) x = w - x;
+      return { x: x, y: y };
     });
 
     // Draw lines between joints.
@@ -404,6 +433,7 @@ SB.LiveEngine = function () {
     HAND_CONNECTIONS.forEach(function (connection) {
       var start = points[connection[0]];
       var end = points[connection[1]];
+      if (!start || !end) return;
 
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);

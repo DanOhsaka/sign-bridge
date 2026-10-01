@@ -33,10 +33,13 @@ SB.TranslateView = function () {
       if (!st) return;
       if (count > 0) {
         st.classList.add("is-hands");
+        var overlayOn = SB.settings.landmarks !== false;
         st.innerHTML = '<span class="dot"></span>Hand detected — ' +
           (live().hasClassifier()
             ? "recognizing…"
-            : "landmarks tracking. Attach your classifier to start recognizing (see docs/MODELS.md).");
+            : (overlayOn
+              ? "landmark overlay on. Attach your classifier to start recognizing (see docs/MODELS.md)."
+              : "tracking, but overlay is off — turn on Landmarks to see the skeleton."));
       } else {
         st.classList.remove("is-hands");
         st.innerHTML = '<span class="dot"></span>Move a hand into view…';
@@ -50,6 +53,11 @@ SB.TranslateView = function () {
     bindDemoActions();
     bindTranscriptActions();
     setPill("demo");
+    /* Reflect saved toggle state even before Live starts */
+    var lmChip = SB.$("#landmarkToggle");
+    var mirChip = SB.$("#mirrorToggle");
+    if (lmChip) lmChip.classList.toggle("is-on", SB.settings.landmarks !== false);
+    if (mirChip) mirChip.classList.toggle("is-on", !!SB.settings.mirror);
   }
 
   /* ---------- engine status pill (topbar) ---------- */
@@ -97,7 +105,7 @@ SB.TranslateView = function () {
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
     var stage = SB.$("#stage");
-    stage.classList.remove("is-cam");
+    stage.classList.remove("is-cam", "is-mirror");
     setStageOverlay(null);
     SB.$("#stageDemo").style.display = "";
     SB.$("#mirrorToggle").classList.remove("is-on");
@@ -124,8 +132,11 @@ SB.TranslateView = function () {
     }).then(function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");
+      stage.classList.toggle("is-mirror", !!SB.settings.mirror);
       SB.$("#mirrorToggle").classList.toggle("is-on", SB.settings.mirror);
       SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks);
+      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
+      if (live().setMirror) live().setMirror(SB.settings.mirror);
       setPill("live");
       if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
       SB.toast(live().hasClassifier()
@@ -153,6 +164,9 @@ SB.TranslateView = function () {
       SB.settings.mirror = !SB.settings.mirror;
       SB.saveSettings();
       mirrorBtn.classList.toggle("is-on", SB.settings.mirror);
+      var stage = SB.$("#stage");
+      if (stage) stage.classList.toggle("is-mirror", !!SB.settings.mirror && stage.classList.contains("is-cam"));
+      if (live().setMirror) live().setMirror(SB.settings.mirror);
       SB.toast("Mirror mode " + (SB.settings.mirror ? "on" : "off"), "info");
     });
 
@@ -161,6 +175,14 @@ SB.TranslateView = function () {
       SB.settings.landmarks = !SB.settings.landmarks;
       SB.saveSettings();
       lmBtn.classList.toggle("is-on", SB.settings.landmarks);
+      /* Must update the running LiveEngine — settings alone don't redraw */
+      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
+      var st = SB.$("#stageStatus");
+      if (st && st.classList.contains("is-hands")) {
+        st.innerHTML = SB.settings.landmarks
+          ? '<span class="dot"></span>Hand detected — landmark overlay on.'
+          : '<span class="dot"></span>Hand detected — overlay off (turn on Landmarks to see the skeleton).';
+      }
       SB.toast("Landmark overlay " + (SB.settings.landmarks ? "on" : "off"), "info");
     });
   }

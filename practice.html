@@ -33,12 +33,17 @@
         <a data-nav="learn" href="learn.html" title="Explore ASL vocabulary">Learn</a>
       </nav>
       <div class="topbar-actions">
-        <!-- Sliding dark/light theme switcher -->
-        <div class="theme-switch" id="themeSwitch" onclick="SB && SB.toggleTheme ? SB.toggleTheme() : toggleTheme()" title="Toggle theme" role="switch" aria-label="Toggle dark/light mode">
+        <div class="theme-switch" id="themeSwitch" title="Toggle theme" role="switch" aria-label="Toggle theme" style="cursor:pointer">
           <div class="ts-track">
             <div class="ts-pill" id="tsPill"></div>
-            <div class="ts-opt ts-dark"><span class="ts-icon">☾</span><span class="ts-label">Dark</span></div>
-            <div class="ts-opt ts-light"><span class="ts-icon">☀</span><span class="ts-label">Light</span></div>
+            <div class="ts-opt ts-dark">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              Dark
+            </div>
+            <div class="ts-opt ts-light">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+              Light
+            </div>
           </div>
         </div>
         <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>

@@ -23,9 +23,12 @@ SB.SettingsView = function () {
 
   function bindTheme() {
     SB.$("#setTheme").addEventListener("change", function (e) {
-      SB.settings.theme = e.target.value;
-      SB.saveSettings();
-      SB.applyTheme();
+      if (SB.setTheme) SB.setTheme(e.target.value);
+      else {
+        SB.settings.theme = e.target.value;
+        SB.saveSettings();
+        SB.applyTheme();
+      }
     });
   }
 
@@ -56,6 +59,18 @@ SB.SettingsView = function () {
       SB.saveSettings();
       syncForm();
       if (key === "reduceMotion") SB.applyTheme();
+      /* Keep live camera overlay/mirror in sync with settings drawer */
+      try {
+        var eng = SB.Engine && SB.Engine.getLiveEngine && SB.Engine.getLiveEngine();
+        if (eng) {
+          if (key === "landmarks" && eng.setDrawLandmarks) eng.setDrawLandmarks(SB.settings.landmarks);
+          if (key === "mirror" && eng.setMirror) {
+            eng.setMirror(SB.settings.mirror);
+            var stage = SB.$("#stage");
+            if (stage) stage.classList.toggle("is-mirror", !!SB.settings.mirror && stage.classList.contains("is-cam"));
+          }
+        }
+      } catch (e) {}
     });
   }
 

@@ -497,12 +497,26 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   background: var(--surface);
 }
 
+/* Demo-mode hand mark — static (no bounce / spin / shimmer) */
+.demo-hand,
+.stage-demo .demo-hand,
+.auth-welcome .demo-hand {
+  animation: none !important;
+  transform: none !important;
+}
+.demo-hand::before,
+.demo-hand::after,
+.stage-demo .demo-hand::after,
+.logo-mark::after {
+  animation: none !important;
+  opacity: 0 !important;
+}
+
 /* Reduce motion */
 html.reduce-motion .view,
 html.reduce-motion .feedback.is-show,
 html.reduce-motion .anim-rise,
-html.reduce-motion .anim-pop,
-.demo-hand {
+html.reduce-motion .anim-pop {
   animation-duration: .01ms !important;
 }
 html.reduce-motion *,
