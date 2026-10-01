@@ -898,3 +898,134 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 
 /* theme switcher SVG */
 .ts-opt svg { width: 12px; height: 12px; flex: none; }
+
+/* ══════════════════════════════════
+   LIGHT THEME — via data-theme on <html> (set by JS)
+   (replaces body.light-mode which the JS never sets)
+══════════════════════════════════ */
+[data-theme="light"] {
+  --bg:            #f2f5fd;
+  --bg-glow:       #ffffff;
+  --surface:       rgba(255,255,255,.97);
+  --surface-2:     rgba(243,246,255,.95);
+  --surface-3:     rgba(232,238,255,.98);
+  --border:        rgba(20,40,100,.1);
+  --border-strong: rgba(20,40,100,.22);
+  --text:    #0c1424;
+  --text-2:  #3d4f72;
+  --text-3:  #7685a0;
+  --teal:       #0d9488;
+  --teal-soft:  rgba(13,148,136,.12);
+  --violet:     #7c3aed;
+  --violet-soft:rgba(124,58,237,.12);
+  --amber:      #b45309;
+  --amber-soft: rgba(180,83,9,.1);
+  --red:        #dc2626;
+  --red-soft:   rgba(220,38,38,.1);
+  --green:      #059669;
+  --green-soft: rgba(5,150,105,.1);
+  --grad: linear-gradient(135deg,#0d9488,#7c3aed);
+  --grad-soft: linear-gradient(135deg,rgba(13,148,136,.12),rgba(124,58,237,.12));
+  --glow-teal:  0 0 0 1px rgba(13,148,136,.3), 0 0 20px rgba(13,148,136,.15);
+  --glow-violet:0 0 0 1px rgba(124,58,237,.3), 0 0 20px rgba(124,58,237,.15);
+  --shadow-1: 0 1px 3px rgba(0,0,0,.06);
+  --shadow-2: 0 8px 24px -8px rgba(0,0,0,.12);
+}
+[data-theme="light"] body { background: var(--bg); }
+[data-theme="light"] body::before {
+  background:
+    radial-gradient(ellipse 900px 500px at 8% -5%,rgba(13,148,136,.06) 0%,transparent 60%),
+    radial-gradient(ellipse 800px 500px at 92% 0%,rgba(124,58,237,.05) 0%,transparent 60%);
+}
+[data-theme="light"] .card { box-shadow: 0 4px 24px -6px rgba(0,0,0,.1); }
+[data-theme="light"] .btn-grad { color: #fff; }
+[data-theme="light"] .btn-blur { background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.12); color:var(--text); }
+[data-theme="light"] .btn-blur:hover { background:rgba(0,0,0,.08); }
+[data-theme="light"] .chip.is-on,
+[data-theme="light"] .chip.on { border-color:rgba(13,148,136,.5); box-shadow:0 0 0 1px rgba(13,148,136,.25),0 0 16px rgba(13,148,136,.15); }
+[data-theme="light"] .theme-switch.is-dark .ts-opt.ts-dark   { color: #fff; }
+[data-theme="light"] .theme-switch.is-light .ts-opt.ts-light { color: #fff; }
+[data-theme="light"] .nav a.active { color: #fff !important; }
+[data-theme="light"] .seg-track { background:var(--surface); box-shadow:0 1px 4px rgba(0,0,0,.1); }
+[data-theme="light"] .spotlight-word { text-shadow:0 0 30px rgba(13,148,136,.3); }
+[data-theme="light"] .btn-border-magic::after { background:var(--surface-2); }
+
+/* ══════════════════════════════════
+   OLD .btn CLASS BRIDGE
+   Maps the JS-rendered .btn.btn-primary / .btn.btn-ghost
+   to our new visual styles without touching the JS
+══════════════════════════════════ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 9px 18px; border-radius: 10px;
+  font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  font-family: var(--font-body); border: none;
+  position: relative; overflow: hidden; white-space: nowrap;
+  transition: all var(--t-fast) var(--ease); letter-spacing: -.01em;
+  text-decoration: none;
+}
+.btn.btn-primary {
+  background: var(--grad); color: #030712;
+  box-shadow: 0 2px 16px rgba(45,212,191,.3);
+}
+[data-theme="light"] .btn.btn-primary { color: #fff; }
+.btn.btn-primary::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(105deg,transparent 35%,rgba(255,255,255,.2) 50%,transparent 65%);
+  background-size: 200% 100%; background-position: 200% 0;
+  transition: background-position var(--t-med) var(--ease);
+}
+.btn.btn-primary:hover { transform: translateY(-2px); box-shadow: var(--glow-teal), 0 8px 24px rgba(45,212,191,.2); }
+.btn.btn-primary:hover::after { background-position: -50% 0; }
+.btn.btn-primary:active { transform: scale(.97); }
+
+.btn.btn-ghost {
+  background: var(--surface-2); color: var(--text);
+  border: 1px solid var(--border) !important;
+}
+.btn.btn-ghost:hover { border-color: var(--border-strong) !important; transform: translateY(-2px); }
+
+.btn.btn-soft {
+  background: var(--teal-soft); color: var(--teal);
+  border: 1px solid rgba(45,212,191,.3) !important;
+}
+.btn.btn-soft:hover { box-shadow: var(--glow-teal); transform: translateY(-2px); }
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+.btn.btn-sm { padding: 5px 12px; font-size: var(--fs-xs); border-radius: 8px; }
+
+/* ══════════════════════════════════
+   DEMO HAND — conic spin ring
+   (the JS renders #stageDemo .demo-hand)
+══════════════════════════════════ */
+.demo-hand {
+  font-size: 54px;
+  width: 114px; height: 114px;
+  display: grid; place-items: center;
+  margin: 0 auto 20px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(167,139,250,.25), rgba(45,212,191,.1));
+  border: 1px solid rgba(167,139,250,.3);
+  box-shadow: 0 0 40px rgba(167,139,250,.15), 0 0 80px rgba(45,212,191,.08);
+  animation: floatY 3.8s ease-in-out infinite;
+  position: relative;
+}
+.demo-hand::before {
+  content: "";
+  position: absolute; inset: -3px; border-radius: 50%; z-index: -1;
+  background: conic-gradient(from var(--hangle,0deg), transparent 60%, rgba(45,212,191,.6), rgba(167,139,250,.6), transparent);
+  animation: spin-hand 4s linear infinite;
+}
+@property --hangle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+@keyframes spin-hand { to { --hangle: 360deg; } }
+@keyframes floatY { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+
+/* stage-demo h2 gradient text */
+.stage-demo h2 {
+  font-family: var(--font-display);
+  font-size: var(--fs-lg);
+  margin-bottom: 8px;
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}

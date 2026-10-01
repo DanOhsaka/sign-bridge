@@ -163,7 +163,7 @@ SB.initCommon = function () {
   /* global topbar wiring — sliding theme switch */
   var themeSwitch = SB.$("#themeSwitch");
   if (themeSwitch) {
-    // Re-position pill after fonts + layout settle
+    themeSwitch.addEventListener("click", SB.toggleTheme);
     requestAnimationFrame(function () {
       setTimeout(function () {
         var pref = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
@@ -173,6 +173,36 @@ SB.initCommon = function () {
     });
     window.addEventListener("resize", function () { SB.applyTheme(); });
   }
+
+  /* nav sliding pill */
+  SB._movePill = function () {
+    var active = SB.$(".nav a.active");
+    var pill   = SB.$("#navPill");
+    var nav    = SB.$(".nav");
+    if (!active || !pill || !nav) return;
+    var nr = nav.getBoundingClientRect();
+    var ar = active.getBoundingClientRect();
+    pill.style.left  = (ar.left - nr.left) + "px";
+    pill.style.width = ar.width + "px";
+  };
+  setTimeout(SB._movePill, 100);
+  window.addEventListener("resize", SB._movePill);
+
+  /* segmented mode-switch track */
+  SB._moveSegTrack = function () {
+    var seg   = SB.$("#modeSeg");
+    var track = SB.$("#modeSegTrack");
+    if (!seg || !track) return;
+    var active = seg.querySelector("button.is-on");
+    if (!active) return;
+    var sr = seg.getBoundingClientRect();
+    var br = active.getBoundingClientRect();
+    track.style.left  = (br.left - sr.left - 3) + "px";
+    track.style.width = br.width + "px";
+  };
+  setTimeout(SB._moveSegTrack, 120);
+  var modeSeg = SB.$("#modeSeg");
+  if (modeSeg) modeSeg.addEventListener("click", function () { setTimeout(SB._moveSegTrack, 10); });
 
   var settingsBtn = SB.$("#settingsBtn");
   var backdrop = SB.$("#drawerBackdrop");
