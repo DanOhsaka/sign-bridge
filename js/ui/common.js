@@ -46,16 +46,39 @@ SB.applyTheme = function () {
   var pref = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   var theme = SB.settings.theme === "auto" ? pref : SB.settings.theme;
   document.documentElement.setAttribute("data-theme", theme);
-  var btn = SB.$("#themeBtn");
-  if (btn) btn.textContent = theme === "dark" ? "☾" : "☀";
+  SB._positionThemePill(theme);
+};
+
+/* Move the sliding pill to the active side */
+SB._positionThemePill = function (theme) {
+  var sw   = SB.$("#themeSwitch");
+  var pill = SB.$("#tsPill");
+  if (!sw || !pill) return;
+
+  // resolve "auto" to the real theme for pill position
+  var resolved = theme;
+  if (resolved === "auto") {
+    resolved = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+
+  var target = sw.querySelector(".ts-" + resolved);
+  var track  = sw.querySelector(".ts-track");
+  if (!target || !track) return;
+
+  var tr = track.getBoundingClientRect();
+  var mr = target.getBoundingClientRect();
+  pill.style.left  = (mr.left - tr.left) + "px";
+  pill.style.width = mr.width + "px";
+
+  sw.classList.toggle("is-dark",  resolved === "dark");
+  sw.classList.toggle("is-light", resolved === "light");
 };
 
 SB.toggleTheme = function () {
-  var order = ["dark", "light", "auto"];
-  SB.settings.theme = order[(order.indexOf(SB.settings.theme) + 1) % order.length];
+  // Only cycle dark ↔ light (skip "auto" for the switch UI)
+  SB.settings.theme = SB.settings.theme === "dark" ? "light" : "dark";
   SB.saveSettings();
   SB.applyTheme();
-  SB.toast("Theme: " + SB.settings.theme, "info");
 };
 
 /* ---------- Toasts ---------- */
@@ -137,9 +160,19 @@ SB.closeDrawer = function () {
 SB.initCommon = function () {
   SB.loadVoices();
 
-  /* global topbar wiring */
-  var themeBtn = SB.$("#themeBtn");
-  if (themeBtn) themeBtn.addEventListener("click", SB.toggleTheme);
+  /* global topbar wiring — sliding theme switch */
+  var themeSwitch = SB.$("#themeSwitch");
+  if (themeSwitch) {
+    // Re-position pill after fonts + layout settle
+    requestAnimationFrame(function () {
+      setTimeout(function () {
+        var pref = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        var theme = SB.settings.theme === "auto" ? pref : SB.settings.theme;
+        SB._positionThemePill(theme);
+      }, 80);
+    });
+    window.addEventListener("resize", function () { SB.applyTheme(); });
+  }
 
   var settingsBtn = SB.$("#settingsBtn");
   var backdrop = SB.$("#drawerBackdrop");

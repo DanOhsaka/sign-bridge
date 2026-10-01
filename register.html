@@ -30,7 +30,14 @@
         <a data-nav="learn" href="learn.html">Learn</a>
       </nav>
       <div class="topbar-actions">
-        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
+        <!-- Sliding dark/light theme switcher -->
+        <div class="theme-switch" id="themeSwitch" onclick="SB && SB.toggleTheme ? SB.toggleTheme() : toggleTheme()" title="Toggle theme" role="switch" aria-label="Toggle dark/light mode">
+          <div class="ts-track">
+            <div class="ts-pill" id="tsPill"></div>
+            <div class="ts-opt ts-dark"><span class="ts-icon">☾</span><span class="ts-label">Dark</span></div>
+            <div class="ts-opt ts-light"><span class="ts-icon">☀</span><span class="ts-label">Light</span></div>
+          </div>
+        </div>
         <div id="authSlot" class="auth-slot">
           <a class="chip" href="login.html">Log in</a>
         </div>
