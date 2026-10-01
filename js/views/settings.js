@@ -23,9 +23,12 @@ SB.SettingsView = function () {
 
   function bindTheme() {
     SB.$("#setTheme").addEventListener("change", function (e) {
-      SB.settings.theme = e.target.value;
-      SB.saveSettings();
-      SB.applyTheme();
+      if (SB.setTheme) SB.setTheme(e.target.value);
+      else {
+        SB.settings.theme = e.target.value;
+        SB.saveSettings();
+        SB.applyTheme();
+      }
     });
   }
 

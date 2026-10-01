@@ -79,11 +79,16 @@ SB._positionThemePill = function (theme) {
   sw.classList.toggle("is-light", resolved === "light");
 };
 
-SB.toggleTheme = function () {
-  // Only cycle dark ↔ light (skip "auto" for the switch UI)
-  SB.settings.theme = SB.settings.theme === "dark" ? "light" : "dark";
+SB.setTheme = function (theme) {
+  if (theme !== "dark" && theme !== "light" && theme !== "auto") return;
+  SB.settings.theme = theme;
   SB.saveSettings();
   SB.applyTheme();
+};
+
+SB.toggleTheme = function () {
+  var current = SB.resolveTheme();
+  SB.setTheme(current === "dark" ? "light" : "dark");
 };
 
 /* ---------- Toasts ---------- */
@@ -168,13 +173,18 @@ SB.initCommon = function () {
   /* global topbar wiring — sliding theme switch */
   var themeSwitch = SB.$("#themeSwitch");
   if (themeSwitch) {
-    themeSwitch.addEventListener("click", SB.toggleTheme);
+    /* One handler only — inline onclick on some pages caused double-toggle */
+    themeSwitch.addEventListener("click", function (e) {
+      var opt = e.target.closest && e.target.closest(".ts-dark, .ts-light");
+      if (opt) {
+        var want = opt.classList.contains("ts-light") ? "light" : "dark";
+        if (SB.resolveTheme() !== want) SB.setTheme(want);
+        return;
+      }
+      SB.toggleTheme();
+    });
     requestAnimationFrame(function () {
-      setTimeout(function () {
-        var pref = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-        var theme = SB.settings.theme === "auto" ? pref : SB.settings.theme;
-        SB._positionThemePill(theme);
-      }, 80);
+      setTimeout(function () { SB._positionThemePill(SB.resolveTheme()); }, 80);
     });
     window.addEventListener("resize", function () { SB.applyTheme(); });
   }
