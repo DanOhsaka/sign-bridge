@@ -69,6 +69,8 @@ SB.Transcript = function (container, opts) {
 
   /* one recognised token → one animated word */
   self.addToken = function (tok) {
+    var empty = SB.$(".empty", el);
+    if (empty) empty.remove();
     var b = bubbleFor(tok);
     var wordsBox = b.querySelector(".bubble-words");
     var span = document.createElement("span");
@@ -124,7 +126,12 @@ SB.Transcript = function (container, opts) {
   };
 
   self.clear = function () {
-    el.innerHTML = "";
+    el.innerHTML =
+      '<div class="empty">' +
+      '<div class="empty-icon">🗣️</div>' +
+      '<div class="empty-title">Live transcript</div>' +
+      '<div class="empty-hint">No signs yet. Start the demo or enable Live camera — recognized signs appear here in real time.</div>' +
+      "</div>";
     openBubble = null;
   };
 

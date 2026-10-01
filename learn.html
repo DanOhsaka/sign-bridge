@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
   <title>SignBridge — Learn</title>
   <meta name="description" content="SignBridge reference — sign dictionary, ASL facts, and how to communicate with Deaf people.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
@@ -11,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/views.css">
+  <link rel="stylesheet" href="styles/polish.css">
 </head>
 <body data-view="learn">
 
@@ -25,9 +27,10 @@
         </span>
       </a>
       <nav class="nav" aria-label="Main">
-        <a data-nav="translate" href="index.html">Translate</a>
-        <a data-nav="practice" href="practice.html">Practice</a>
-        <a data-nav="learn" href="learn.html">Learn</a>
+        <div class="nav-pill" id="navPill"></div>
+        <a data-nav="translate" href="index.html" title="Live sign → text">Translate</a>
+        <a data-nav="practice" href="practice.html" title="Test your signing skills">Practice</a>
+        <a data-nav="learn" href="learn.html" title="Explore ASL vocabulary">Learn</a>
       </nav>
       <div class="topbar-actions">
         <!-- Sliding dark/light theme switcher -->
@@ -48,7 +51,7 @@
     <main class="view view--learn">
       <div class="learn-hero">
         <h1>Learn to communicate</h1>
-        <p>Every card is a lesson: the sign, why it works, and the trap that gets students. Press <strong>Show me</strong> to watch it flow through the recognizer.</p>
+        <p>Browse common ASL signs. Open a card and press <strong>Practice</strong> to watch it stream through the recognizer.</p>
       </div>
 
       <div class="learn-toolbar">

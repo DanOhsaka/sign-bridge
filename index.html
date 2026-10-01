@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
   <title>SignBridge — Live Translate</title>
   <meta name="description" content="SignBridge — a live sign-language translator and learning companion.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
@@ -11,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/views.css">
+  <link rel="stylesheet" href="styles/polish.css">
 </head>
 <body data-view="translate">
 <div class="app">
@@ -26,9 +28,9 @@
 
     <nav class="nav" aria-label="Main">
       <div class="nav-pill" id="navPill"></div>
-      <a data-nav="translate" href="index.html">Translate</a>
-      <a data-nav="practice" href="practice.html">Practice</a>
-      <a data-nav="learn" href="learn.html">Learn</a>
+      <a data-nav="translate" href="index.html" title="Live sign → text">Translate</a>
+      <a data-nav="practice" href="practice.html" title="Test your signing skills">Practice</a>
+      <a data-nav="learn" href="learn.html" title="Explore ASL vocabulary">Learn</a>
     </nav>
 
     <div class="topbar-actions">
@@ -91,6 +93,14 @@
       <div class="stage" id="stage">
         <video id="cam" autoplay playsinline muted></video>
         <canvas id="overlay" aria-hidden="true"></canvas>
+        <div class="stage-live-badge" aria-live="polite"><span class="dot"></span> Live camera</div>
+        <div class="stage-overlay-state" id="stageOverlay" hidden>
+          <div>
+            <div class="spinner" aria-hidden="true"></div>
+            <div class="overlay-title empty-title" style="color:var(--text)">Starting camera…</div>
+            <p class="overlay-detail empty-hint" style="margin:8px auto 0">Allow camera access if prompted.</p>
+          </div>
+        </div>
         <div class="stage-demo" id="stageDemo">
           <div class="demo-hand">✋</div>
           <h2>Demo mode</h2>
@@ -101,8 +111,7 @@
               Watch a live demo
             </button>
             <button class="btn-blur" data-go-live="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-              Try real hand tracking
+              Or try real hand tracking
             </button>
           </div>
           <div class="demo-hint">Tip: switch to <strong>Live</strong> for real MediaPipe hand landmarks — the same skeleton your trained model will read.</div>
@@ -152,8 +161,8 @@
       <div class="transcript" id="transcript" aria-live="polite">
         <div class="empty">
           <div class="empty-icon">🗣️</div>
-          Press <span class="kbd">1</span>–<span class="kbd">9</span>, click a phrase, or hit
-          <em>Watch a live demo</em> — everything streams here, word by word.
+          <div class="empty-title">Live transcript</div>
+          <div class="empty-hint">No signs yet. Start the demo, press <span class="kbd">1</span>–<span class="kbd">9</span>, or enable Live camera — recognized signs appear here in real time.</div>
         </div>
       </div>
     </section>

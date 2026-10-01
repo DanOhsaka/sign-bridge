@@ -73,37 +73,76 @@ SB.TranslateView = function () {
     });
   }
 
+  function setStageOverlay(kind, title, detail) {
+    var stage = SB.$("#stage");
+    var overlay = SB.$("#stageOverlay");
+    if (!stage) return;
+    stage.classList.remove("is-starting", "is-error");
+    if (!kind) {
+      if (overlay) overlay.hidden = true;
+      return;
+    }
+    stage.classList.add(kind === "error" ? "is-error" : "is-starting");
+    if (!overlay) return;
+    overlay.hidden = false;
+    var titleEl = SB.$(".overlay-title", overlay);
+    var detailEl = SB.$(".overlay-detail", overlay);
+    var spin = SB.$(".spinner", overlay);
+    if (titleEl) titleEl.textContent = title || "";
+    if (detailEl) detailEl.textContent = detail || "";
+    if (spin) spin.style.display = kind === "starting" ? "" : "none";
+  }
+
   function goDemo() {
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
-    SB.$("#stage").classList.remove("is-cam");
+    var stage = SB.$("#stage");
+    stage.classList.remove("is-cam");
+    setStageOverlay(null);
     SB.$("#stageDemo").style.display = "";
     SB.$("#mirrorToggle").classList.remove("is-on");
     var st = SB.$("#stageStatus");
-    if (st) { st.classList.remove("is-hands"); st.innerHTML = '<span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.'; }
+    if (st) {
+      st.classList.remove("is-hands");
+      st.innerHTML = '<span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.';
+    }
     setPill("demo");
   }
 
   function goLive() {
     var stage = SB.$("#stage");
+    SB.$("#stageDemo").style.display = "none";
+    setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
+    var st = SB.$("#stageStatus");
+    if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
+
     SB.Engine.setMode("live", {
       videoEl: SB.$("#cam"),
       canvasEl: SB.$("#overlay"),
       mirror: SB.settings.mirror,
       drawLandmarks: SB.settings.landmarks,
     }).then(function () {
+      setStageOverlay(null);
       stage.classList.add("is-cam");
-      SB.$("#stageDemo").style.display = "none";
       SB.$("#mirrorToggle").classList.toggle("is-on", SB.settings.mirror);
       SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks);
       setPill("live");
+      if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
       SB.toast(live().hasClassifier()
         ? "Live engine on — hand tracking + your classifier"
         : "Live engine on — hand landmarks tracking (attach a classifier to recognize)", "ok");
     }).catch(function (err) {
+      setStageOverlay("error", "Camera unavailable",
+        (err && err.message ? err.message : "Permission denied or no camera found.") + " You can stay in Demo mode.");
       setPill("demo", true);
       SB.toast("Live mode needs a camera — " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
       SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
+      setTimeout(function () {
+        setStageOverlay(null);
+        goDemo();
+        SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
+        if (SB._moveSegTrack) SB._moveSegTrack();
+      }, 2200);
     });
   }
 
