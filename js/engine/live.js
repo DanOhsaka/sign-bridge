@@ -48,7 +48,12 @@ SB.LiveEngine = function () {
 
   var mirror = true;
   var drawLandmarksEnabled = true;
-  var showHud = true;
+  /* Dev overlay (Cam/Infer/Age…) — off by default; enable with ?debugTrack=1 */
+  var showHud = false;
+  try {
+    showHud = !!(typeof location !== "undefined" &&
+      /(?:^|[?&])debugTrack=1(?:&|$)/.test(location.search || ""));
+  } catch (e) {}
 
   /* Latest measured hands (recognition) + UI hands (filtered/predicted) */
   var rawHands = { left: null, right: null, tMs: 0, mediaMs: 0 };
@@ -799,6 +804,7 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
 
   function updateHud(now) {
+    var statsTick = false;
     if (now - lastStatsTick >= 500) {
       var dt = (now - lastStatsTick) / 1000;
       stats.camFps = camFrameCount / dt;
@@ -808,12 +814,24 @@ SB.LiveEngine = function () {
       inferFrameCount = 0;
       renderFrameCount = 0;
       lastStatsTick = now;
+      statsTick = true;
     }
 
-    if (!showHud) return;
     var el = document.getElementById("trackHud");
     if (!el) return;
+    if (!showHud) {
+      if (!el.hidden) {
+        el.hidden = true;
+        el.textContent = "";
+        el.setAttribute("aria-hidden", "true");
+      }
+      return;
+    }
+    /* Only rewrite DOM on the stats tick — Age was flickering every frame */
+    if (!statsTick && el.dataset.armed === "1") return;
+    el.dataset.armed = "1";
     el.hidden = false;
+    el.setAttribute("aria-hidden", "false");
     el.textContent =
       "Cam " + stats.camFps.toFixed(0) +
       " · Infer " + stats.inferFps.toFixed(0) +
