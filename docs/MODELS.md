@@ -25,6 +25,9 @@ Real-time rules already implemented in `js/engine/live.js`:
 - Infer on a downscaled canvas; overlay maps normalized 0–1 coords to the display
 - Recognition uses **measured** landmarks; smoothing/prediction is UI-only
 - Overlay draws on its own `requestAnimationFrame` loop (not tied to React/state)
+- **Hand lifecycle** `tracking → uncertain → lost` with ~75ms ghost expiry (render loop, not waiting on next inference)
+- Discard **out-of-order** worker results; HUD reports **frame age** and stale drops
+- Per-joint **One Euro** (wrist smoother, fingertips faster) + short visual prediction
 
 The classifier returns `{ text, conf, alt? }` — the same token contract the transcript UI already renders.
 

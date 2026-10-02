@@ -2,6 +2,8 @@
    SignBridge — One Euro Filter (oneEuro.js)
    Motion-aware smoothing: stable when slow, responsive when fast.
    Used for UI landmark overlay only — not for recognition features.
+
+   Per-joint tuning: wrist/palm smoother; fingertips follow faster.
    ============================================================ */
 
 window.SB = window.SB || {};
@@ -19,6 +21,12 @@ SB.OneEuroFilter.prototype.reset = function () {
   this.xPrev = null;
   this.dxPrev = null;
   this.tPrev = null;
+};
+
+SB.OneEuroFilter.prototype.setParams = function (minCutoff, beta, dCutoff) {
+  if (minCutoff != null) this.minCutoff = minCutoff;
+  if (beta != null) this.beta = beta;
+  if (dCutoff != null) this.dCutoff = dCutoff;
 };
 
 SB.OneEuroFilter.prototype.filter = function (t, x) {
@@ -51,23 +59,46 @@ SB._oneEuroLowpass = function (x, xPrev, a) {
   return a * x + (1 - a) * xPrev;
 };
 
+/* MediaPipe hand indices: 0 wrist, tips 4/8/12/16/20 */
+SB.HAND_JOINT_PROFILE = function (index) {
+  /* Higher minCutoff + beta → less lag when moving */
+  if (index === 0) return { minCutoff: 1.05, beta: 0.32 };           /* wrist */
+  if (index === 1 || index === 5 || index === 9 || index === 13 || index === 17) {
+    return { minCutoff: 1.25, beta: 0.45 };                          /* palm / MCP */
+  }
+  if (index === 4 || index === 8 || index === 12 || index === 16 || index === 20) {
+    return { minCutoff: 1.85, beta: 0.95 };                          /* tips */
+  }
+  return { minCutoff: 1.45, beta: 0.65 };                            /* PIP / DIP */
+};
+
 /** Per-hand landmark filter bank: 21 joints × (x,y[,z]). */
 SB.HandLandmarkFilter = function (opts) {
   opts = opts || {};
-  this.minCutoff = opts.minCutoff == null ? 1.35 : opts.minCutoff;
-  this.beta = opts.beta == null ? 0.55 : opts.beta;
+  this.baseMinCutoff = opts.minCutoff == null ? 1.35 : opts.minCutoff;
+  this.baseBeta = opts.beta == null ? 0.55 : opts.beta;
   this.dCutoff = opts.dCutoff == null ? 1.0 : opts.dCutoff;
   this.includeZ = !!opts.includeZ;
+  this.perJoint = opts.perJoint !== false;
   this.filters = [];
   this._ensure(21);
 };
 
+SB.HandLandmarkFilter.prototype._paramsFor = function (index) {
+  if (!this.perJoint) {
+    return { minCutoff: this.baseMinCutoff, beta: this.baseBeta };
+  }
+  return SB.HAND_JOINT_PROFILE(index);
+};
+
 SB.HandLandmarkFilter.prototype._ensure = function (n) {
   while (this.filters.length < n) {
+    var i = this.filters.length;
+    var p = this._paramsFor(i);
     this.filters.push({
-      x: new SB.OneEuroFilter(this.minCutoff, this.beta, this.dCutoff),
-      y: new SB.OneEuroFilter(this.minCutoff, this.beta, this.dCutoff),
-      z: new SB.OneEuroFilter(this.minCutoff, this.beta, this.dCutoff),
+      x: new SB.OneEuroFilter(p.minCutoff, p.beta, this.dCutoff),
+      y: new SB.OneEuroFilter(p.minCutoff, p.beta, this.dCutoff),
+      z: new SB.OneEuroFilter(p.minCutoff, p.beta, this.dCutoff),
     });
   }
 };

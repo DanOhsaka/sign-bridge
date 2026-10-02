@@ -44,6 +44,30 @@ SB.TranslateView = function () {
         st.classList.remove("is-hands");
         st.innerHTML = '<span class="dot"></span>Move a hand into view…';
       }
+      updateLiveTranscriptIdle(count);
+    });
+
+    /* Fine-grained track lifecycle (ghost fade, quality, hints) */
+    SB.Engine.on("track", function (info) {
+      if (SB.Engine.getMode() !== "live") return;
+      var st = SB.$("#stageStatus");
+      if (!st) return;
+      if (info.hands > 0) {
+        st.classList.add("is-hands");
+        if (info.hasClassifier) {
+          st.innerHTML = '<span class="dot"></span>Recognizing gesture…';
+        } else if (info.trackState === "uncertain") {
+          st.innerHTML = '<span class="dot"></span>' + (info.hint || "Reacquiring hand…");
+        } else {
+          st.innerHTML = '<span class="dot"></span>Tracking ' + info.hands +
+            (info.hands === 1 ? " hand" : " hands") +
+            " — waiting for a recognizable sign…";
+        }
+      } else {
+        st.classList.remove("is-hands");
+        st.innerHTML = '<span class="dot"></span>' + (info.hint || "Keep your hands inside the frame");
+      }
+      updateLiveTranscriptIdle(info.hands, info);
     });
 
     bindModeSwitch();
@@ -101,6 +125,23 @@ SB.TranslateView = function () {
     if (spin) spin.style.display = kind === "starting" ? "" : "none";
   }
 
+  function updateLiveTranscriptIdle(handCount, info) {
+    var empty = SB.$("#transcript .empty");
+    if (!empty || SB.Engine.getMode() !== "live") return;
+    var title = SB.$(".empty-title", empty);
+    var hint = SB.$(".empty-hint", empty);
+    if (!title || !hint) return;
+    if (handCount > 0) {
+      title.textContent = info && info.hasClassifier ? "Recognizing…" : "Tracking hands";
+      hint.innerHTML = info && info.hasClassifier
+        ? "Hold a sign steady — recognized words will appear here."
+        : "Hands are tracked. Attach a classifier to recognize signs (see <span class=\"kbd\">docs/MODELS.md</span>), or use Demo phrases.";
+    } else {
+      title.textContent = "Live transcript";
+      hint.textContent = "Move a hand into frame to start tracking. Recognized signs will appear here in real time.";
+    }
+  }
+
   function goDemo() {
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
@@ -109,10 +150,19 @@ SB.TranslateView = function () {
     setStageOverlay(null);
     SB.$("#stageDemo").style.display = "";
     SB.$("#mirrorToggle").classList.remove("is-on");
+    var tq = SB.$("#trackQuality");
+    if (tq) { tq.hidden = true; tq.textContent = ""; }
     var st = SB.$("#stageStatus");
     if (st) {
       st.classList.remove("is-hands");
       st.innerHTML = '<span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.';
+    }
+    var empty = SB.$("#transcript .empty");
+    if (empty) {
+      var title = SB.$(".empty-title", empty);
+      var hint = SB.$(".empty-hint", empty);
+      if (title) title.textContent = "Live transcript";
+      if (hint) hint.innerHTML = "No signs yet. Start the demo, press <span class=\"kbd\">1</span>–<span class=\"kbd\">9</span>, or enable Live camera — recognized signs appear here in real time.";
     }
     setPill("demo");
   }
@@ -139,6 +189,7 @@ SB.TranslateView = function () {
       if (live().setMirror) live().setMirror(SB.settings.mirror);
       setPill("live");
       if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
+      updateLiveTranscriptIdle(0);
       SB.toast(live().hasClassifier()
         ? "Live engine on — hand tracking + your classifier"
         : "Live engine on — hand landmarks tracking (attach a classifier to recognize)", "ok");
