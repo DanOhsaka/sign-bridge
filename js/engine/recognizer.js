@@ -20,7 +20,7 @@ window.SB = window.SB || {};
 
 SB.Engine = (function () {
   var mode = "demo";            // 'demo' | 'live'
-  var listeners = { hands: [], status: [], result: [], track: [] };
+  var listeners = { hands: [], status: [], result: [] };
   var sim = null;               // SB.SimEngine (lazy)
   var live = null;              // SB.LiveEngine (lazy)
 
@@ -70,7 +70,6 @@ SB.Engine = (function () {
     /* ---- live-mode internals (called by SB.LiveEngine) ---- */
     _hands: function (count) { emit("hands", count); },
     _result: function (token) { emit("result", token); },
-    _track: function (info) { emit("track", info); },
 
     /* ---- access to the live engine (single instance) ---- */
     getLiveEngine: function () { return liveEngine(); },

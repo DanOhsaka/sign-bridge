@@ -289,19 +289,6 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   box-shadow: 0 0 8px var(--teal);
   animation: pulse 1.4s ease-in-out infinite;
 }
-.stage-live-badge .track-quality {
-  margin-left: 2px;
-  padding-left: 8px;
-  border-left: 1px solid rgba(255,255,255,.22);
-  font-weight: 600;
-  letter-spacing: .02em;
-  text-transform: none;
-  opacity: .92;
-}
-.stage-live-badge .track-quality[data-quality="excellent"] { color: #5eead4; }
-.stage-live-badge .track-quality[data-quality="good"] { color: #a5f3fc; }
-.stage-live-badge .track-quality[data-quality="fair"] { color: #fde68a; }
-.stage-live-badge .track-quality[data-quality="searching"] { color: rgba(255,255,255,.75); }
 
 /* Semantic badges only */
 .badge { font-size: 11px; letter-spacing: .04em; }

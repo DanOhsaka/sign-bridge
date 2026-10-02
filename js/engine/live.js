@@ -5,18 +5,18 @@
 
      Camera (display) ──────────────► <video>
            │
-           ▼ downscale ≤640px ImageBitmap
-     HandLandmarker Web Worker (GPU) via RVFC + busy gate
+           ▼ (downscale branch)
+     Inference canvas ≤640px
            │
-           ├── raw landmarks ──► classifier (never predicted)
+           ▼ requestVideoFrameCallback + busy gate
+     HandLandmarker in Web Worker (GPU when available)
            │
-           └── hand lifecycle ──► One Euro (per-joint) + light predict
-                                  └── rAF overlay (opacity / expiry)
+           ├── raw landmarks ──► classifier / recognition
+           │
+           └── UI buffer ──► One Euro + short prediction
+                              └── requestAnimationFrame overlay
 
-   Ghost hands: render loop expires a slot ~70ms after lastSeen,
-   independent of the next inference result.
-   Stale / out-of-order worker results are discarded for pose updates
-   but still refresh presence so disappearance is not delayed.
+   Never queue inference. If the model is busy, drop the frame.
    ============================================================ */
 
 window.SB = window.SB || {};
@@ -27,13 +27,11 @@ SB.LiveEngine = function () {
   var state = "off";
   var classifier = null;
 
-  var landmarker = null;
+  var landmarker = null;   /* main-thread fallback only */
   var worker = null;
   var workerReady = false;
   var useWorker = false;
   var detectId = 0;
-  var latestAcceptedId = 0;
-  var latestAcceptedMediaMs = -1;
   var stream = null;
 
   var videoEl = null;
@@ -51,46 +49,27 @@ SB.LiveEngine = function () {
   var mirror = true;
   var drawLandmarksEnabled = true;
   var showHud = true;
-  var showHandLabels = true;
 
-  /* Lifecycle timeouts (ms) — short enough to kill ghosts, long enough to avoid flicker */
-  var UNCERTAIN_MS = 45;
-  var LOST_MS = 75;
-  var FADE_MS = 70;
-  var MAX_RESULT_AGE_MS = 70;
+  /* Latest measured hands (recognition) + UI hands (filtered/predicted) */
+  var rawHands = { left: null, right: null, tMs: 0, mediaMs: 0 };
+  var uiHands = { left: null, right: null };
+  var prevRaw = { left: null, right: null, tMs: 0 };
 
-  var predictSec = 0.028;
-  var maxPredictNorm = 0.07;
-  var INFER_MAX_W = 640;
-
-  var leftFilter = new SB.HandLandmarkFilter({ perJoint: true });
-  var rightFilter = new SB.HandLandmarkFilter({ perJoint: true });
+  var leftFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
+  var rightFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
   var leftUiBuf = [];
   var rightUiBuf = [];
   var leftPredBuf = [];
   var rightPredBuf = [];
   var drawPtsBuf = [];
 
-  function makeSlot() {
-    return {
-      state: "lost",       /* tracking | uncertain | lost */
-      raw: null,
-      prevRaw: null,
-      ui: null,
-      conf: 0,
-      lastSeenMs: 0,
-      captureMs: 0,
-      mediaMs: 0,
-      rawAtMs: 0,
-      rawDtMs: 33,
-      opacity: 0,
-      label: "",
-    };
-  }
+  /* Latency compensation for overlay only (seconds of extrapolation). */
+  var predictSec = 0.035;
+  var maxPredictNorm = 0.08;
 
-  var slots = { left: makeSlot(), right: makeSlot() };
-  var prevPairTMs = 0;
+  var INFER_MAX_W = 640;
 
+  /* Perf / HUD */
   var stats = {
     camFps: 0,
     inferFps: 0,
@@ -98,19 +77,15 @@ SB.LiveEngine = function () {
     inferMs: 0,
     frameAgeMs: 0,
     dropped: 0,
-    stale: 0,
     hands: 0,
-    quality: "idle",
-    trackState: "lost",
     backend: "—",
   };
   var camFrameCount = 0;
   var inferFrameCount = 0;
   var renderFrameCount = 0;
   var lastStatsTick = 0;
+  var lastInferEndMs = 0;
   var lastMediaTimestampMs = 0;
-  var lastTrackEmit = "";
-  var lastHandsEmit = -1;
 
   var HAND_CONNECTIONS = [
     [0, 1], [1, 2], [2, 3], [3, 4],
@@ -149,6 +124,7 @@ SB.LiveEngine = function () {
     }
     return new Promise(function (resolve, reject) {
       try {
+        /* Classic worker: MediaPipe WASM uses importScripts (blocked in module workers). */
         worker = new Worker("js/engine/handWorker.js");
       } catch (err) {
         reject(err);
@@ -201,8 +177,13 @@ SB.LiveEngine = function () {
     var msg = ev.data || {};
     if (msg.type === "result") {
       stats.inferMs = msg.inferMs || 0;
+      lastInferEndMs = performance.now();
       inferFrameCount++;
-      acceptResult(msg, msg.landmarks, msg.handednesses);
+      ingestResults(
+        { landmarks: msg.landmarks, handednesses: msg.handednesses },
+        lastInferEndMs,
+        msg.mediaMs
+      );
       inferenceBusy = false;
       return;
     }
@@ -259,6 +240,7 @@ SB.LiveEngine = function () {
     var scale = Math.min(1, INFER_MAX_W / Math.max(srcW, 1));
     var w = Math.max(2, Math.round(srcW * scale));
     var h = Math.max(2, Math.round(srcH * scale));
+    /* Keep even dims — friendlier for some backends */
     if (w % 2) w -= 1;
     if (h % 2) h -= 1;
     if (inferCanvas.width !== w || inferCanvas.height !== h) {
@@ -272,32 +254,39 @@ SB.LiveEngine = function () {
   // Public API
   // ----------------------------------------------------------
 
-  self.setClassifier = function (fn) { classifier = fn || null; };
-  self.hasClassifier = function () { return !!classifier; };
-  self.getState = function () { return state; };
+  self.setClassifier = function (fn) {
+    classifier = fn || null;
+  };
+
+  self.hasClassifier = function () {
+    return !!classifier;
+  };
+
+  self.getState = function () {
+    return state;
+  };
 
   self.setDrawLandmarks = function (on) {
     drawLandmarksEnabled = !!on;
     if (!drawLandmarksEnabled) clearCanvas();
   };
 
-  self.setMirror = function (on) { mirror = !!on; };
-  self.getDrawLandmarks = function () { return drawLandmarksEnabled; };
+  self.setMirror = function (on) {
+    mirror = !!on;
+  };
+
+  self.getDrawLandmarks = function () {
+    return drawLandmarksEnabled;
+  };
+
   self.setShowHud = function (on) {
     showHud = !!on;
     var el = document.getElementById("trackHud");
     if (el && !showHud) el.hidden = true;
   };
-  self.getPerfStats = function () { return Object.assign({}, stats); };
-  self.getTrackSnapshot = function () {
-    return {
-      hands: stats.hands,
-      quality: stats.quality,
-      trackState: stats.trackState,
-      frameAgeMs: stats.frameAgeMs,
-      left: slots.left.state,
-      right: slots.right.state,
-    };
+
+  self.getPerfStats = function () {
+    return Object.assign({}, stats);
   };
 
   // ----------------------------------------------------------
@@ -306,7 +295,10 @@ SB.LiveEngine = function () {
 
   self.start = function (opts) {
     opts = opts || {};
-    if (state === "starting" || state === "on") return Promise.resolve(self);
+
+    if (state === "starting" || state === "on") {
+      return Promise.resolve(self);
+    }
 
     state = "starting";
     videoEl = opts.videoEl;
@@ -339,14 +331,17 @@ SB.LiveEngine = function () {
       })
       .then(function (camStream) {
         stream = camStream;
-        console.log("Camera settings:", stream.getVideoTracks()[0].getSettings());
+        var track = stream.getVideoTracks()[0];
+        console.log("Camera settings:", track.getSettings());
         videoEl.srcObject = stream;
         return new Promise(function (resolve) {
           if (videoEl.readyState >= 1 && videoEl.videoWidth > 0) resolve();
           else videoEl.onloadedmetadata = resolve;
         });
       })
-      .then(function () { return videoEl.play(); })
+      .then(function () {
+        return videoEl.play();
+      })
       .then(function () {
         syncCanvasSize();
         resetTrackingState();
@@ -355,7 +350,7 @@ SB.LiveEngine = function () {
         lastStatsTick = performance.now();
         startInferenceLoop();
         startRenderLoop();
-        console.log("Live engine started (lifecycle + stale discard).");
+        console.log("Live engine started (HandLandmarker, latest-frame pipeline).");
         return self;
       })
       .catch(function (err) {
@@ -377,10 +372,7 @@ SB.LiveEngine = function () {
     resetTrackingState();
     var hud = document.getElementById("trackHud");
     if (hud) hud.hidden = true;
-    var q = document.getElementById("trackQuality");
-    if (q) { q.hidden = true; q.textContent = ""; }
     state = "off";
-    emitTrackStatus(true);
     console.log("Camera stopped.");
   };
 
@@ -393,29 +385,27 @@ SB.LiveEngine = function () {
   }
 
   function resetTrackingState() {
-    slots.left = makeSlot();
-    slots.right = makeSlot();
+    rawHands.left = rawHands.right = null;
+    rawHands.tMs = 0;
+    uiHands.left = uiHands.right = null;
+    prevRaw.left = prevRaw.right = null;
+    prevRaw.tMs = 0;
     leftFilter.reset();
     rightFilter.reset();
-    prevPairTMs = 0;
-    latestAcceptedId = 0;
-    latestAcceptedMediaMs = -1;
     stats.dropped = 0;
-    stats.stale = 0;
-    stats.hands = 0;
-    stats.quality = "idle";
-    stats.trackState = "lost";
-    lastTrackEmit = "";
-    lastHandsEmit = -1;
   }
 
   // ----------------------------------------------------------
-  // Inference loop
+  // Inference loop — RVFC, never queue stale work
   // ----------------------------------------------------------
 
   function startInferenceLoop() {
-    if (useRvfc) rvfcHandle = videoEl.requestVideoFrameCallback(onVideoFrame);
-    else renderKickInfer();
+    if (useRvfc) {
+      rvfcHandle = videoEl.requestVideoFrameCallback(onVideoFrame);
+    } else {
+      /* Fallback: rAF with busy gate (still drops while inferring). */
+      renderKickInfer();
+    }
   }
 
   function stopInferenceLoop() {
@@ -436,11 +426,14 @@ SB.LiveEngine = function () {
     camFrameCount++;
 
     if (inferenceBusy) {
+      /* Model still working — discard this camera frame. Freshness > completeness. */
       stats.dropped++;
     } else {
       var mediaMs = metadata && metadata.mediaTime != null
         ? metadata.mediaTime * 1000
         : now;
+      /* Fire-and-forget: re-register RVFC immediately so later frames can be dropped
+         while this one is still in flight (async bitmap + sync detect). */
       runInference(now, mediaMs);
     }
 
@@ -471,13 +464,17 @@ SB.LiveEngine = function () {
     if (ts <= lastMediaTimestampMs) ts = lastMediaTimestampMs + 1;
     lastMediaTimestampMs = ts;
 
-    var bitmapPromise = typeof createImageBitmap === "function"
-      ? createImageBitmap(videoEl, {
-          resizeWidth: targetW,
-          resizeHeight: targetH,
-          resizeQuality: "low",
-        })
-      : (inferCtx.drawImage(videoEl, 0, 0, targetW, targetH), Promise.resolve(canvas));
+    var bitmapPromise;
+    if (typeof createImageBitmap === "function") {
+      bitmapPromise = createImageBitmap(videoEl, {
+        resizeWidth: targetW,
+        resizeHeight: targetH,
+        resizeQuality: "low",
+      });
+    } else {
+      inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
+      bitmapPromise = Promise.resolve(canvas);
+    }
 
     bitmapPromise
       .then(function (input) {
@@ -487,14 +484,13 @@ SB.LiveEngine = function () {
           return;
         }
 
-        detectId += 1;
-        var id = detectId;
-
         if (useWorker && workerReady && worker && input && input.close) {
+          /* Transfer bitmap to worker — UI thread stays free for rAF overlay. */
+          detectId += 1;
           worker.postMessage(
             {
               type: "detect",
-              id: id,
+              id: detectId,
               bitmap: input,
               timestamp: ts,
               wallSentMs: t0,
@@ -513,12 +509,9 @@ SB.LiveEngine = function () {
         var results = landmarker.detectForVideo(input, ts);
         if (input && input.close) input.close();
         stats.inferMs = performance.now() - t0;
+        lastInferEndMs = performance.now();
         inferFrameCount++;
-        acceptResult(
-          { id: id, timestamp: ts, wallSentMs: t0, mediaMs: ts, inferMs: stats.inferMs },
-          results.landmarks,
-          results.handednesses || results.handedness
-        );
+        ingestResults(results, lastInferEndMs, ts);
         inferenceBusy = false;
       })
       .catch(function (err) {
@@ -528,51 +521,56 @@ SB.LiveEngine = function () {
   }
 
   // ----------------------------------------------------------
-  // Accept / reject results + hand slots
+  // Results → stable left/right + recognition (raw only)
   // ----------------------------------------------------------
 
-  function acceptResult(meta, landmarks, handednesses) {
-    var now = performance.now();
-    var id = meta.id || 0;
-    var mediaMs = meta.mediaMs != null ? meta.mediaMs : meta.timestamp;
-    var captureMs = meta.wallSentMs != null ? meta.wallSentMs : now;
-    var age = now - captureMs;
+  function ingestResults(results, wallMs, mediaMs) {
+    var left = null;
+    var right = null;
 
-    /* Out-of-order: never apply an older pose after a newer one */
-    var outOfOrder = id < latestAcceptedId ||
-      (mediaMs != null && latestAcceptedMediaMs >= 0 && mediaMs < latestAcceptedMediaMs);
+    var lms = results.landmarks || [];
+    var handed = results.handednesses || results.handedness || [];
 
-    if (outOfOrder) {
-      stats.stale++;
-      return;
+    for (var i = 0; i < lms.length; i++) {
+      var label = handednessLabel(handed[i]);
+      var pts = cloneLandmarks(lms[i]);
+      if (label === "Left") {
+        if (!left) left = pts;
+        else right = right || pts;
+      } else if (label === "Right") {
+        if (!right) right = pts;
+        else left = left || pts;
+      } else {
+        /* Unknown — associate by nearest previous wrist */
+        var slot = associateHand(pts);
+        if (slot === "left" && !left) left = pts;
+        else if (slot === "right" && !right) right = pts;
+        else if (!left) left = pts;
+        else if (!right) right = pts;
+      }
     }
 
-    if (age > MAX_RESULT_AGE_MS) stats.stale++;
+    /* Temporal consistency: undo identity swaps when wrists cross */
+    var pair = resolveIdentity(left, right);
+    left = pair.left;
+    right = pair.right;
 
-    latestAcceptedId = Math.max(latestAcceptedId, id);
-    if (mediaMs != null) latestAcceptedMediaMs = mediaMs;
+    prevRaw.left = rawHands.left;
+    prevRaw.right = rawHands.right;
+    prevRaw.tMs = rawHands.tMs;
 
-    var parsed = parseHands(landmarks || [], handednesses || []);
-    var left = parsed.left;
-    var right = parsed.right;
-    var leftConf = parsed.leftConf;
-    var rightConf = parsed.rightConf;
+    rawHands.left = left;
+    rawHands.right = right;
+    rawHands.tMs = wallMs;
+    rawHands.mediaMs = mediaMs;
 
-    /* Presence: only refresh lastSeen when this hand is in the result.
-       Misses leave lastSeen aging → render loop kills ghosts in ~75ms
-       even if the next inference takes much longer. */
-    touchSlot("left", left, leftConf, now, captureMs, mediaMs);
-    touchSlot("right", right, rightConf, now, captureMs, mediaMs);
+    var handCount = (left ? 1 : 0) + (right ? 1 : 0);
+    stats.hands = handCount;
+    if (SB.Engine && SB.Engine._hands) SB.Engine._hands(handCount);
 
-    var detected = (left ? 1 : 0) + (right ? 1 : 0);
-    stats.hands = detected;
-    if (detected !== lastHandsEmit && SB.Engine && SB.Engine._hands) {
-      lastHandsEmit = detected;
-      SB.Engine._hands(detected);
-    }
-
+    /* Recognition uses measured landmarks only — never predicted UI coords */
     if (classifier) {
-      var classifierHand = (right && right.lms) || (left && left.lms);
+      var classifierHand = right || left;
       if (classifierHand) {
         var features = landmarkVector(classifierHand);
         var token = null;
@@ -586,80 +584,16 @@ SB.LiveEngine = function () {
       }
     }
 
-    stats.frameAgeMs = age;
+    /* Update UI buffers immediately after measure (render loop will paint) */
+    updateUiFromRaw(wallMs);
   }
 
-  function touchSlot(side, hand, conf, now, captureMs, mediaMs) {
-    var slot = slots[side];
-    var filter = side === "left" ? leftFilter : rightFilter;
-    var buf = side === "left" ? leftUiBuf : rightUiBuf;
-
-    if (hand && hand.lms) {
-      slot.lastSeenMs = now;
-      slot.conf = conf;
-      slot.label = hand.label || (side === "left" ? "L" : "R");
-      slot.state = conf >= 0.5 ? "tracking" : "uncertain";
-      slot.captureMs = captureMs;
-      slot.mediaMs = mediaMs;
-      if (slot.rawAtMs) slot.rawDtMs = Math.max(8, now - slot.rawAtMs);
-      slot.prevRaw = slot.raw;
-      slot.raw = hand.lms;
-      slot.rawAtMs = now;
-      slot.ui = filter.apply(now / 1000, hand.lms, buf);
-      prevPairTMs = now;
-      return;
-    }
-
-    /* Missed this hand in the result — do NOT refresh lastSeen.
-       Render loop will move tracking → uncertain → lost. */
-  }
-
-  function parseHands(lms, handed) {
-    var left = null;
-    var right = null;
-    var leftConf = 0;
-    var rightConf = 0;
-
-    for (var i = 0; i < lms.length; i++) {
-      var info = handednessInfo(handed[i]);
-      var pts = cloneLandmarks(lms[i]);
-      var pack = { lms: pts, label: info.label === "Left" ? "L" : info.label === "Right" ? "R" : "" };
-
-      if (info.label === "Left") {
-        if (!left) { left = pack; leftConf = info.score; }
-        else if (!right) { right = pack; rightConf = info.score; }
-      } else if (info.label === "Right") {
-        if (!right) { right = pack; rightConf = info.score; }
-        else if (!left) { left = pack; leftConf = info.score; }
-      } else {
-        var slotName = associateHand(pts);
-        if (slotName === "left" && !left) { left = pack; leftConf = info.score || 0.5; }
-        else if (slotName === "right" && !right) { right = pack; rightConf = info.score || 0.5; }
-        else if (!left) { left = pack; leftConf = info.score || 0.5; }
-        else if (!right) { right = pack; rightConf = info.score || 0.5; }
-      }
-    }
-
-    var pair = resolveIdentity(
-      left && left.lms,
-      right && right.lms
-    );
-    if (pair.swapped) {
-      var tmp = left; left = right; right = tmp;
-      var tc = leftConf; leftConf = rightConf; rightConf = tc;
-    }
-
-    return { left: left, right: right, leftConf: leftConf, rightConf: rightConf };
-  }
-
-  function handednessInfo(entry) {
-    if (!entry) return { label: "", score: 0 };
+  function handednessLabel(entry) {
+    if (!entry) return "";
+    /* Tasks API: array of Category, or nested */
     var cat = Array.isArray(entry) ? entry[0] : entry;
-    if (!cat) return { label: "", score: 0 };
-    return {
-      label: cat.categoryName || cat.displayName || "",
-      score: typeof cat.score === "number" ? cat.score : 0.8,
-    };
+    if (!cat) return "";
+    return cat.categoryName || cat.displayName || "";
   }
 
   function cloneLandmarks(src) {
@@ -678,75 +612,45 @@ SB.LiveEngine = function () {
   }
 
   function associateHand(pts) {
-    var dL = wristDist(pts, slots.left.raw);
-    var dR = wristDist(pts, slots.right.raw);
+    var dL = wristDist(pts, rawHands.left);
+    var dR = wristDist(pts, rawHands.right);
     if (dL === Infinity && dR === Infinity) return "left";
     return dL <= dR ? "left" : "right";
   }
 
   function resolveIdentity(left, right) {
-    if (!left || !right || !slots.left.raw || !slots.right.raw) {
-      return { left: left, right: right, swapped: false };
+    if (!left || !right || !prevRaw.left || !prevRaw.right) {
+      return { left: left, right: right };
     }
-    var keep = wristDist(left, slots.left.raw) + wristDist(right, slots.right.raw);
-    var swap = wristDist(left, slots.right.raw) + wristDist(right, slots.left.raw);
-    if (swap + 1e-6 < keep) return { left: right, right: left, swapped: true };
-    return { left: left, right: right, swapped: false };
+    /* If swapped assignment is closer to previous wrists, swap back */
+    var keep =
+      wristDist(left, prevRaw.left) + wristDist(right, prevRaw.right);
+    var swap =
+      wristDist(left, prevRaw.right) + wristDist(right, prevRaw.left);
+    if (swap + 1e-6 < keep) {
+      return { left: right, right: left };
+    }
+    return { left: left, right: right };
   }
 
-  // ----------------------------------------------------------
-  // Lifecycle expiry (ghost killer) — runs every render frame
-  // ----------------------------------------------------------
-
-  function expireSlots(now) {
-    expireOne("left", now);
-    expireOne("right", now);
-  }
-
-  function expireOne(side, now) {
-    var slot = slots[side];
-    if (!slot.lastSeenMs) {
-      clearSlot(side);
-      return;
-    }
-    var age = now - slot.lastSeenMs;
-    if (age > LOST_MS) {
-      clearSlot(side);
-      return;
-    }
-    if (age > UNCERTAIN_MS) {
-      slot.state = "uncertain";
-      /* Fade out over FADE_MS after uncertain begins */
-      var fadeT = (age - UNCERTAIN_MS) / Math.max(1, FADE_MS);
-      slot.opacity = Math.max(0, 1 - fadeT) * confOpacity(slot.conf) * 0.75;
+  function updateUiFromRaw(wallMs) {
+    var tSec = wallMs / 1000;
+    if (rawHands.left) {
+      uiHands.left = leftFilter.apply(tSec, rawHands.left, leftUiBuf);
     } else {
-      slot.state = slot.conf >= 0.5 ? "tracking" : "uncertain";
-      slot.opacity = confOpacity(slot.conf);
+      leftFilter.reset();
+      uiHands.left = null;
+    }
+    if (rawHands.right) {
+      uiHands.right = rightFilter.apply(tSec, rawHands.right, rightUiBuf);
+    } else {
+      rightFilter.reset();
+      uiHands.right = null;
     }
   }
 
-  function clearSlot(side) {
-    var slot = slots[side];
-    if (slot.state === "lost" && !slot.raw) return;
-    slot.state = "lost";
-    slot.raw = null;
-    slot.prevRaw = null;
-    slot.ui = null;
-    slot.conf = 0;
-    slot.opacity = 0;
-    slot.lastSeenMs = 0;
-    if (side === "left") leftFilter.reset();
-    else rightFilter.reset();
-  }
-
-  function confOpacity(conf) {
-    if (conf >= 0.8) return 0.85;
-    if (conf >= 0.5) return 0.55 + (conf - 0.5) * 1.0;
-    return 0.4;
-  }
-
   // ----------------------------------------------------------
-  // Render loop
+  // Render loop — independent of inference FPS
   // ----------------------------------------------------------
 
   function startRenderLoop() {
@@ -754,11 +658,8 @@ SB.LiveEngine = function () {
     function tick(now) {
       if (!running) return;
       renderFrameCount++;
-      expireSlots(now);
       paintOverlay(now);
       updateHud(now);
-      updateQualityBadge();
-      emitTrackStatus(false);
       renderRaf = requestAnimationFrame(tick);
     }
     renderRaf = requestAnimationFrame(tick);
@@ -771,29 +672,15 @@ SB.LiveEngine = function () {
     }
   }
 
-  function predictHand(slot, outBuf) {
-    var filtered = slot.ui;
-    if (!filtered || slot.state === "lost") return null;
-    var raw = slot.raw;
-    var prev = slot.prevRaw;
-    if (!raw || !prev) return filtered;
-
-    var dtSec = Math.max(0.008, (slot.rawDtMs || 33) / 1000);
+  function predictHand(filtered, raw, prev, dtSec, outBuf) {
+    if (!filtered) return null;
+    if (!raw || !prev || dtSec <= 1e-4) return filtered;
     var out = outBuf || [];
+    var lead = predictSec;
     for (var i = 0; i < filtered.length; i++) {
       if (!out[i]) out[i] = { x: 0, y: 0, z: 0 };
-      if (!prev[i] || !raw[i]) {
-        out[i].x = filtered[i].x;
-        out[i].y = filtered[i].y;
-        out[i].z = filtered[i].z;
-        continue;
-      }
       var vx = (raw[i].x - prev[i].x) / dtSec;
       var vy = (raw[i].y - prev[i].y) / dtSec;
-      /* Tips get slightly more lead; wrist less */
-      var lead = (i === 4 || i === 8 || i === 12 || i === 16 || i === 20)
-        ? predictSec * 1.15
-        : (i === 0 ? predictSec * 0.7 : predictSec);
       var dx = vx * lead;
       var dy = vy * lead;
       var mag = Math.sqrt(dx * dx + dy * dy);
@@ -812,6 +699,7 @@ SB.LiveEngine = function () {
 
   function paintOverlay(now) {
     if (!canvasEl || !videoEl) return;
+
     if (!drawLandmarksEnabled) {
       clearCanvas();
       return;
@@ -821,47 +709,45 @@ SB.LiveEngine = function () {
     var ctx = canvasEl.getContext("2d");
     ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
 
-    /* Frame age of the freshest displayed hand capture */
-    var cap = 0;
-    if (slots.left.state !== "lost" && slots.left.captureMs) cap = Math.max(cap, slots.left.captureMs);
-    if (slots.right.state !== "lost" && slots.right.captureMs) cap = Math.max(cap, slots.right.captureMs);
-    stats.frameAgeMs = cap ? Math.max(0, now - cap) : stats.frameAgeMs;
+    var age = rawHands.tMs ? Math.max(0, now - rawHands.tMs) : 0;
+    stats.frameAgeMs = age;
 
-    if (slots.left.state !== "lost" && slots.left.opacity > 0.02) {
-      var l = predictHand(slots.left, leftPredBuf);
-      if (l) drawHand(ctx, l, showHandLabels ? "L" : "", slots.left.opacity);
-    }
-    if (slots.right.state !== "lost" && slots.right.opacity > 0.02) {
-      var r = predictHand(slots.right, rightPredBuf);
-      if (r) drawHand(ctx, r, showHandLabels ? "R" : "", slots.right.opacity);
-    }
+    var dtSec = prevRaw.tMs ? (rawHands.tMs - prevRaw.tMs) / 1000 : 0;
+
+    var leftDraw = predictHand(
+      uiHands.left, rawHands.left, prevRaw.left, dtSec, leftPredBuf
+    );
+    var rightDraw = predictHand(
+      uiHands.right, rawHands.right, prevRaw.right, dtSec, rightPredBuf
+    );
+
+    if (leftDraw) drawHand(ctx, leftDraw, "L");
+    if (rightDraw) drawHand(ctx, rightDraw, "R");
   }
 
-  function drawHand(ctx, landmarks, label, opacity) {
+  function drawHand(ctx, landmarks, label) {
     var w = canvasEl.width;
     var h = canvasEl.height;
     var n = landmarks.length;
-    var a = opacity == null ? 0.85 : opacity;
 
     while (drawPtsBuf.length < n) drawPtsBuf.push({ x: 0, y: 0 });
     for (var i = 0; i < n; i++) {
       var x = landmarks[i].x * w;
       var y = landmarks[i].y * h;
-      /* Mirror is a display transform only — model handedness stays semantic */
       if (mirror) x = w - x;
       drawPtsBuf[i].x = x;
       drawPtsBuf[i].y = y;
     }
 
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 1.75;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "rgba(52, 224, 192, " + (0.38 * a) + ")";
+    ctx.strokeStyle = "rgba(52, 224, 192, .42)";
 
     for (var c = 0; c < HAND_CONNECTIONS.length; c++) {
-      var i0 = HAND_CONNECTIONS[c][0];
-      var i1 = HAND_CONNECTIONS[c][1];
-      var p0 = drawPtsBuf[i0];
-      var p1 = drawPtsBuf[i1];
+      var a = HAND_CONNECTIONS[c][0];
+      var b = HAND_CONNECTIONS[c][1];
+      var p0 = drawPtsBuf[a];
+      var p1 = drawPtsBuf[b];
       if (!p0 || !p1) continue;
       ctx.beginPath();
       ctx.moveTo(p0.x, p0.y);
@@ -871,26 +757,24 @@ SB.LiveEngine = function () {
 
     for (var j = 0; j < n; j++) {
       var pt = drawPtsBuf[j];
-      var rad = j === 0 ? 4 : 2.5;
+      var r = j === 0 ? 4.5 : 2.75;
       ctx.beginPath();
-      ctx.arc(pt.x, pt.y, rad, 0, Math.PI * 2);
-      ctx.fillStyle = j === 0
-        ? "rgba(255,180,84," + (0.9 * a) + ")"
-        : "rgba(139,140,255," + (0.75 * a) + ")";
+      ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = j === 0 ? "rgba(255,180,84,.95)" : "rgba(139,140,255,.85)";
       ctx.fill();
     }
 
     if (label && landmarks[0]) {
-      ctx.font = "600 10px Inter, system-ui, sans-serif";
-      ctx.globalAlpha = a;
-      ctx.fillStyle = "rgba(232,238,252,.88)";
-      ctx.strokeStyle = "rgba(6,10,20,.55)";
-      ctx.lineWidth = 2.5;
-      var tx = drawPtsBuf[0].x + (mirror ? -12 : 7);
-      var ty = drawPtsBuf[0].y - 9;
+      var wx = drawPtsBuf[0].x;
+      var wy = drawPtsBuf[0].y;
+      ctx.font = "600 11px Inter, system-ui, sans-serif";
+      ctx.fillStyle = "rgba(232,238,252,.9)";
+      ctx.strokeStyle = "rgba(6,10,20,.65)";
+      ctx.lineWidth = 3;
+      var tx = wx + (mirror ? -14 : 8);
+      var ty = wy - 10;
       ctx.strokeText(label, tx, ty);
       ctx.fillText(label, tx, ty);
-      ctx.globalAlpha = 1;
     }
   }
 
@@ -906,22 +790,13 @@ SB.LiveEngine = function () {
 
   function clearCanvas() {
     if (!canvasEl) return;
-    canvasEl.getContext("2d").clearRect(0, 0, canvasEl.width, canvasEl.height);
+    var ctx = canvasEl.getContext("2d");
+    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   }
 
   // ----------------------------------------------------------
-  // HUD + quality badge + status events
+  // HUD
   // ----------------------------------------------------------
-
-  function computeQuality() {
-    var n = (slots.left.state !== "lost" ? 1 : 0) + (slots.right.state !== "lost" ? 1 : 0);
-    var anyUncertain = slots.left.state === "uncertain" || slots.right.state === "uncertain";
-    var age = stats.frameAgeMs;
-    if (n === 0) return { quality: "searching", trackState: "lost", hands: 0 };
-    if (anyUncertain || age > 80) return { quality: "fair", trackState: "uncertain", hands: n };
-    if (age > 60) return { quality: "good", trackState: "tracking", hands: n };
-    return { quality: "excellent", trackState: "tracking", hands: n };
-  }
 
   function updateHud(now) {
     if (now - lastStatsTick >= 500) {
@@ -935,11 +810,6 @@ SB.LiveEngine = function () {
       lastStatsTick = now;
     }
 
-    var q = computeQuality();
-    stats.quality = q.quality;
-    stats.trackState = q.trackState;
-    stats.hands = q.hands;
-
     if (!showHud) return;
     var el = document.getElementById("trackHud");
     if (!el) return;
@@ -951,49 +821,12 @@ SB.LiveEngine = function () {
       " · Draw " + stats.renderFps.toFixed(0) +
       " · Age " + stats.frameAgeMs.toFixed(0) + "ms" +
       " · Drop " + stats.dropped +
-      " · Stale " + stats.stale +
       " · Hands " + stats.hands +
       " · " + stats.backend;
   }
 
-  function updateQualityBadge() {
-    var el = document.getElementById("trackQuality");
-    if (!el || state !== "on") return;
-    el.hidden = false;
-    var q = stats.quality;
-    var label =
-      q === "excellent" ? "Tracking: Excellent" :
-      q === "good" ? "Tracking: Good" :
-      q === "fair" ? "Tracking: Fair" :
-      stats.hands > 0 ? "Tracking…" :
-      "Looking for hands";
-    el.textContent = label;
-    el.dataset.quality = q;
-  }
-
-  function emitTrackStatus(force) {
-    if (!SB.Engine || !SB.Engine._track) return;
-    var hint = "";
-    if (stats.trackState === "lost") hint = "Keep your hands inside the frame";
-    else if (stats.frameAgeMs > 100) hint = "Move slightly slower";
-    else if (stats.trackState === "uncertain") hint = "Reacquiring hand…";
-
-    var payload = {
-      hands: stats.hands,
-      quality: stats.quality,
-      trackState: stats.trackState,
-      frameAgeMs: stats.frameAgeMs,
-      hint: hint,
-      hasClassifier: !!classifier,
-    };
-    var key = payload.hands + "|" + payload.quality + "|" + payload.trackState + "|" + payload.hint;
-    if (!force && key === lastTrackEmit) return;
-    lastTrackEmit = key;
-    SB.Engine._track(payload);
-  }
-
   // ----------------------------------------------------------
-  // Features for classifier
+  // Features for classifier (unchanged contract)
   // ----------------------------------------------------------
 
   function landmarkVector(landmarks) {

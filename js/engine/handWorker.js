@@ -30,11 +30,8 @@ function serializeHandedness(list) {
     var entry = list[i];
     var cat = Array.isArray(entry) ? entry[0] : entry;
     out[i] = cat
-      ? [{
-          categoryName: cat.categoryName || cat.displayName || "",
-          score: typeof cat.score === "number" ? cat.score : 0.8,
-        }]
-      : [{ categoryName: "", score: 0 }];
+      ? [{ categoryName: cat.categoryName || cat.displayName || "" }]
+      : [{ categoryName: "" }];
   }
   return out;
 }
