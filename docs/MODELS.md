@@ -11,11 +11,22 @@ SignBridge runs **live, in a browser, on student laptops**. That rules out heavy
 ## 2. Recommended pipeline (capstone scope)
 
 ```
-webcam → MediaPipe Hands (21 landmarks × 3 coords)
-       → normalize (x/y to hand bbox, z relative to wrist)   ← ALREADY IMPLEMENTED in js/engine/live.js
-       → classifier: LSTM / GRU / TCN (per-word signs)
-       → token { text, conf, alt }                           ← the contract the UI renders
+webcam (display @ camera res)
+   ├─► <video> preview
+   └─► downscale ≤640px → HandLandmarker VIDEO mode (latest frame only)
+            │
+            ├── raw landmarks → normalize → classifier (LSTM / GRU / TCN)
+            └── UI buffer → One Euro + short prediction → canvas @ rAF
 ```
+
+Real-time rules already implemented in `js/engine/live.js`:
+- **Never queue inference** — if the model is busy, drop the camera frame
+- Drive capture with `requestVideoFrameCallback` when available
+- Infer on a downscaled canvas; overlay maps normalized 0–1 coords to the display
+- Recognition uses **measured** landmarks; smoothing/prediction is UI-only
+- Overlay draws on its own `requestAnimationFrame` loop (not tied to React/state)
+
+The classifier returns `{ text, conf, alt? }` — the same token contract the transcript UI already renders.
 
 **Why LSTM/TCN over fancier options:**
 - The proven real-time baseline — e.g. MediaPipe + LSTM pipelines report ~99%+ on isolated gestures, and MP-GestLSTM is a peer-reviewed 2025 reference (Tandfonline, 2025).
