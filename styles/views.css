@@ -62,6 +62,32 @@
   transform: scaleX(-1);
 }
 
+/* Live tracking latency / FPS HUD (dev-facing, corner of stage) */
+.track-hud {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 4;
+  max-width: calc(100% - 20px);
+  padding: 6px 9px;
+  border-radius: 8px;
+  font: 500 10.5px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.01em;
+  color: rgba(232, 238, 252, 0.92);
+  background: rgba(8, 12, 22, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-theme="light"] .track-hud {
+  color: rgba(20, 28, 44, 0.9);
+  background: rgba(255, 255, 255, 0.72);
+  border-color: rgba(20, 28, 44, 0.08);
+}
+
 /* Demo placeholder */
 .stage-demo {
   text-align: center;
