@@ -1,5 +1,5 @@
 /* ============================================================
-   SignBridge — Live MediaPipe Engine
+   SignBridge â€” Live MediaPipe Engine
    Uses MediaPipe HolisticLandmarker for:
    - Left hand
    - Right hand
@@ -278,6 +278,28 @@ SB.LiveEngine = function () {
       }
     }
 
+          if (
+          window.TrainingRecorder &&
+          TrainingRecorder.processFrame
+      ) {
+        TrainingRecorder.processFrame(
+          results,
+          leftHand,
+          rightHand
+        );
+      }
+      
+      if (
+          window.SignBridgeLiveTest &&
+          typeof SignBridgeLiveTest.processFrame === "function"
+      ) {
+          SignBridgeLiveTest.processFrame(
+              results,
+              leftHand,
+              rightHand
+          );
+      }
+      
     printCoordinates(results, leftHand, rightHand);
   }
 
