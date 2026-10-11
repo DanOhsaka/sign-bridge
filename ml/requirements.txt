@@ -1,0 +1,7 @@
+
+tensorflow
+numpy
+scikit-learn
+fastapi
+uvicorn[standard]
+# run with python -m pip show tensorflow numpy scikit-learn fastapi uvicorn

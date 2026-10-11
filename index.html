@@ -3,9 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SignBridge — Live Translate</title>
-  <meta name="description" content="SignBridge — a live sign-language translator and learning companion. Capstone v0.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <title>SignBridge â€” Live Translate</title>
+  <meta name="description" content="SignBridge â€” a live sign-language translator and learning companion. Capstone v0.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>âœ‹</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
@@ -16,10 +16,10 @@
 
   <div class="app">
 
-    <!-- ══════════ Top bar (shared across pages) ══════════ -->
+    <!-- â•â•â•â•â•â•â•â•â•â• Top bar (shared across pages) â•â•â•â•â•â•â•â•â•â• -->
     <header class="topbar">
       <a class="logo" href="index.html" aria-label="SignBridge home">
-        <span class="logo-mark">✋</span>
+        <span class="logo-mark">âœ‹</span>
         <span>
           <span class="logo-name">Sign<em>Bridge</em></span>
           <span class="logo-sub">live sign translator</span>
@@ -33,31 +33,31 @@
       </nav>
 
       <div class="topbar-actions">
-        <span class="engine-pill is-demo" id="enginePill"><span class="dot"></span><span class="pill-text">Demo · simulated</span></span>
-        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
-        <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+        <span class="engine-pill is-demo" id="enginePill"><span class="dot"></span><span class="pill-text">Demo Â· simulated</span></span>
+        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">â˜¾</button>
+        <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">âš™</button>
         <div id="authSlot" class="auth-slot">
           <a class="chip" href="login.html">Log in</a>
         </div>
       </div>
     </header>
 
-    <!-- ══════════ View: Translate ══════════ -->
+    <!-- â•â•â•â•â•â•â•â•â•â• View: Translate â•â•â•â•â•â•â•â•â•â• -->
     <main class="view view--translate">
 
       <!-- Left: the signing space -->
       <section class="card stage-card">
         <div class="stage-head">
           <h1>Live translate
-            <small>Sign → text, in real time. Watch the machine read your hands.</small>
+            <small>Sign â†’ text, in real time. Watch the machine read your hands.</small>
           </h1>
           <div class="segmented" id="modeSeg" role="tablist" aria-label="Engine mode">
-            <button class="is-on slug-demo" data-mode="demo">🧪 Demo</button>
-            <button class="slug-live" data-mode="live">📷 Live</button>
+            <button class="is-on slug-demo" data-mode="demo">ðŸ§ª Demo</button>
+            <button class="slug-live" data-mode="live">ðŸ“· Live</button>
           </div>
           <div class="stage-toggles">
-            <button class="chip" id="mirrorToggle" title="Mirror the camera feed">🪞 Mirror</button>
-            <button class="chip" id="landmarkToggle" title="Show the 21-point hand skeleton">🦴 Landmarks</button>
+            <button class="chip" id="mirrorToggle" title="Mirror the camera feed">ðŸªž Mirror</button>
+            <button class="chip" id="landmarkToggle" title="Show the 21-point hand skeleton">ðŸ¦´ Landmarks</button>
           </div>
         </div>
 
@@ -65,66 +65,37 @@
           <!-- live mode -->
           <video id="cam" autoplay playsinline muted></video>
           <canvas id="overlay" aria-hidden="true"></canvas>
-
           <!-- demo mode -->
           <div class="stage-demo" id="stageDemo">
-            <div class="demo-hand">✋</div>
+            <div class="demo-hand">âœ‹</div>
             <h2>Demo mode</h2>
-            <p>Recognition is simulated so you can explore the whole UI before the model is trained. Press <span class="kbd">1</span>–<span class="kbd">9</span> to sign, or watch a full session.</p>
+            <p>Recognition is simulated so you can explore the whole UI before the model is trained. Press <span class="kbd">1</span>â€“<span class="kbd">9</span> to sign, or watch a full session.</p>
             <div class="demo-actions">
-              <button class="btn btn-primary" id="watchDemo">▶ Watch a live demo</button>
-              <button class="btn btn-ghost" data-go-live="true">📷 Try real hand tracking</button>
+              <button class="btn btn-primary" id="watchDemo">â–¶ Watch a live demo</button>
+              <button class="btn btn-ghost" data-go-live="true">ðŸ“· Try real hand tracking</button>
             </div>
-            <div class="demo-hint">Tip: switch to <strong>Live</strong> for real MediaPipe hand landmarks — the same skeleton your trained model will read.</div>
+            <div class="demo-hint">Tip: switch to <strong>Live</strong> for real MediaPipe hand landmarks â€” the same skeleton your trained model will read.</div>
           </div>
         </div>
 
         <div class="spell-strip">
-          <input class="input" id="spellInput" placeholder="Spell any word with your hands — try DOG, or your name…" maxlength="24" aria-label="Spell a word">
+          <input class="input" id="spellInput" placeholder="Spell any word with your hands â€” try DOG, or your nameâ€¦" maxlength="24" aria-label="Spell a word">
           <button class="btn btn-soft" id="spellGo">Spell it</button>
         </div>
 
-        <div class="stage-status" id="stageStatus"><span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.</div>
-
-        <!-- LSTM training: record labeled landmark sequences (Live mode only) -->
-        <section class="capture-panel" id="capturePanel" hidden aria-label="Training data capture">
-          <div class="capture-head">
-            <h3>Record training data</h3>
-            <p class="capture-sub">Each take saves one labeled sequence of 63-float frames for LSTM training (<code>docs/MODELS.md</code>).</p>
-          </div>
-          <div class="capture-row">
-            <div class="field capture-field">
-              <label for="captureLabel">Class label</label>
-              <input class="input" id="captureLabel" type="text" maxlength="32" placeholder="e.g. A, HELLO, THANK_YOU" autocomplete="off">
-              <span class="hint">One sign per recording — repeat 100–200 times per class.</span>
-            </div>
-            <div class="capture-actions">
-              <button class="btn btn-soft" type="button" id="captureStart">● Record</button>
-              <button class="btn btn-ghost" type="button" id="captureStop" disabled>■ Stop &amp; save</button>
-              <button class="btn btn-ghost" type="button" id="captureCancel" disabled>Cancel take</button>
-            </div>
-          </div>
-          <div class="capture-meta">
-            <span id="captureStatus">Switch to Live mode to record.</span>
-            <span id="captureCounts">0 samples in memory</span>
-          </div>
-          <div class="capture-export">
-            <button class="btn btn-primary btn-sm" type="button" id="captureDownload">Download JSON dataset</button>
-            <button class="btn btn-ghost btn-sm" type="button" id="captureClear">Clear all samples</button>
-          </div>
-        </section>
+        <div class="stage-status" id="stageStatus"><span class="dot"></span>Demo engine â€” recognition is simulated so the full UI works before the model is trained.</div>
 
         <!-- last recognised sign -->
         <div class="card spotlight" id="spotlight">
-          <div class="spotlight-label">✨ Last signed</div>
-          <div class="spotlight-word">—</div>
+          <div class="spotlight-label">âœ¨ Last signed</div>
+          <div class="spotlight-word">â€”</div>
           <div class="conf-meter" aria-hidden="true"><div class="conf-fill" style="width:0%"></div></div>
           <div class="spotlight-alts"></div>
         </div>
 
         <!-- quick phrases -->
         <div class="quick-phrases">
-          <div class="q-label">🤟 Quick phrases — press a number or click to sign</div>
+          <div class="q-label">ðŸ¤Ÿ Quick phrases â€” press a number or click to sign</div>
           <div class="q-chips" id="quickChips"></div>
         </div>
       </section>
@@ -133,27 +104,27 @@
       <section class="card transcript-card">
         <header>
           <h2>Live transcript</h2>
-          <button class="icon-btn" id="tClear" title="Clear" aria-label="Clear transcript">🗑</button>
-          <button class="icon-btn" id="tCopy" title="Copy" aria-label="Copy transcript">⧉</button>
-          <button class="icon-btn" id="tSpeak" title="Speak out loud" aria-label="Speak transcript">🔊</button>
+          <button class="icon-btn" id="tClear" title="Clear" aria-label="Clear transcript">ðŸ—‘</button>
+          <button class="icon-btn" id="tCopy" title="Copy" aria-label="Copy transcript">â§‰</button>
+          <button class="icon-btn" id="tSpeak" title="Speak out loud" aria-label="Speak transcript">ðŸ”Š</button>
         </header>
         <div class="transcript" id="transcript" aria-live="polite">
           <div class="empty">
-            <div class="empty-icon">🗣️</div>
-            Press <span class="kbd">1</span>–<span class="kbd">9</span>, click a phrase, or hit
-            <em>Watch a live demo</em> — everything streams here, word by word, with the machine's confidence visible on every word.
+            <div class="empty-icon">ðŸ—£ï¸</div>
+            Press <span class="kbd">1</span>â€“<span class="kbd">9</span>, click a phrase, or hit
+            <em>Watch a live demo</em> â€” everything streams here, word by word, with the machine's confidence visible on every word.
           </div>
         </div>
       </section>
     </main>
   </div>
 
-  <!-- ══════════ Settings drawer (shared) ══════════ -->
+  <!-- â•â•â•â•â•â•â•â•â•â• Settings drawer (shared) â•â•â•â•â•â•â•â•â•â• -->
   <div class="drawer-backdrop" id="drawerBackdrop"></div>
   <aside class="drawer" id="settingsDrawer" aria-label="Settings">
     <div class="drawer-head">
       <h3>Settings</h3>
-      <button class="icon-btn" id="drawerClose" aria-label="Close settings">✕</button>
+      <button class="icon-btn" id="drawerClose" aria-label="Close settings">âœ•</button>
     </div>
     <div class="drawer-body">
 
@@ -174,18 +145,18 @@
       </div>
 
       <div class="field">
-        <label for="setRate">Speaking rate — <span id="setRateVal">1×</span></label>
+        <label for="setRate">Speaking rate â€” <span id="setRateVal">1Ã—</span></label>
         <input type="range" id="setRate" min="0.5" max="2" step="0.1">
       </div>
 
       <div class="field">
-        <label for="setThreshold">Confidence threshold — <span id="setThresholdVal"></span></label>
+        <label for="setThreshold">Confidence threshold â€” <span id="setThresholdVal"></span></label>
         <input type="range" id="setThreshold" min="0.3" max="0.8" step="0.05">
         <span class="hint">Words below this are flagged amber/red with alternates. Raise it to be stricter.</span>
       </div>
 
       <div class="toggle-row">
-        <span class="lbl">Mirror mode<small>Flip the camera like a mirror — how learners actually see their hands.</small></span>
+        <span class="lbl">Mirror mode<small>Flip the camera like a mirror â€” how learners actually see their hands.</small></span>
         <button class="toggle" id="setMirror" role="switch" aria-label="Mirror mode"></button>
       </div>
 
@@ -206,14 +177,18 @@
 
   <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
 
-  <!-- ══════════ Scripts (order matters — classic scripts, no build step) ══════════ -->
+  <!-- â•â•â•â•â•â•â•â•â•â• Scripts (order matters â€” classic scripts, no build step) â•â•â•â•â•â•â•â•â•â• -->
   <script src="js/ui/common.js"></script>
   <script src="js/views/auth.js"></script>
   <script src="js/data/signs.js"></script>
   <script src="js/ui/transcript.js"></script>
   <script src="js/engine/recognizer.js"></script>
   <script src="js/engine/simulated.js"></script>
-  <script src="js/engine/capture.js"></script>
+  <!-- <script src="js/training/landmarks.js"></script> --> 
+  <!-- <script src="js/training/normalize.js"></script> -->
+  <script src="js/training/storage.js"></script>
+  <script src="js/training/training.js"></script>
+  <script src="./js/engine/lstm-live-test.js"></script>
   <script src="js/engine/live.js"></script>
   <script src="js/views/translate.js"></script>
   <script src="js/views/settings.js"></script>

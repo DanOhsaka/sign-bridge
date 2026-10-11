@@ -1,7 +1,7 @@
 /* ============================================================
-   SignBridge — Translate view (translate.js)
+   SignBridge â€” Translate view (translate.js)
    ------------------------------------------------------------
-   Two-column learning arc: signing space (left) ↔ live
+   Two-column learning arc: signing space (left) â†” live
    transcript (right). Everything the learner does here lands in
    the transcript, where confidence and alternates make the
    machine's "reading" visible and correctable.
@@ -12,6 +12,8 @@ window.SB = window.SB || {};
 SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
+  var lastPrediction = null;
+  var lastPredictionTime = 0;
 
   function live() { return SB.Engine.getLiveEngine(); }
 
@@ -27,7 +29,52 @@ SB.TranslateView = function () {
       }
     });
 
-    /* hand-presence → status line pulse */
+    // Receive predictions from the Python LSTM service.
+    window.addEventListener(
+      "signbridge:lstm-prediction",
+      function (event) {
+
+        // Only update the interface in Live mode.
+        if (SB.Engine.getMode() !== "live") {
+          return;
+        }
+
+        var result = event.detail;
+
+        if (!result || !result.prediction) {
+          return;
+        }
+
+        var now = Date.now();
+              
+        if (
+          result.prediction === lastPrediction &&
+          now - lastPredictionTime < 2000
+        ) {
+          return;
+        }
+        
+        lastPrediction = result.prediction;
+        lastPredictionTime = now;
+
+        var token = {
+          text: result.prediction,
+          conf: result.confidence
+        };
+
+        transcript.addToken(token);
+        spotlight.show(token);
+        transcript.endUtterance();
+
+        console.log(
+          "SignBridge transcript updated:",
+          token.text
+        );
+      }
+    );
+
+
+    /* hand-presence â†’ status line pulse */
     SB.Engine.on("hands", function (count) {
       var st = SB.$("#stageStatus");
       if (!st) return;
@@ -41,13 +88,13 @@ SB.TranslateView = function () {
       }
       if (count > 0) {
         st.classList.add("is-hands");
-        st.innerHTML = '<span class="dot"></span>Hand detected — ' +
+        st.innerHTML = '<span class="dot"></span>Hand detected â€” ' +
           (live().hasClassifier()
-            ? "recognizing…"
+            ? "recognizingâ€¦"
             : "landmarks tracking. Attach your classifier to start recognizing (see docs/MODELS.md).");
       } else {
         st.classList.remove("is-hands");
-        st.innerHTML = '<span class="dot"></span>Move a hand into view…';
+        st.innerHTML = '<span class="dot"></span>Move a hand into viewâ€¦';
       }
     });
 
@@ -172,7 +219,7 @@ SB.TranslateView = function () {
     var pill = SB.$("#enginePill");
     if (!pill) return;
     pill.className = "engine-pill is-" + (err ? "error" : mode);
-    SB.$(".pill-text", pill).textContent = err ? "Camera unavailable" : (mode === "live" ? "Live · model ready" : "Demo · simulated");
+    SB.$(".pill-text", pill).textContent = err ? "Camera unavailable" : (mode === "live" ? "Live Â· model ready" : "Demo Â· simulated");
   }
 
   /* ---------- Demo / Live mode switch ---------- */
@@ -189,14 +236,16 @@ SB.TranslateView = function () {
   }
 
   function goDemo() {
+    if (window.SignBridgeLiveTest) {
+      window.SignBridgeLiveTest.stop();
+    }
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
     SB.$("#stage").classList.remove("is-cam");
     SB.$("#stageDemo").style.display = "";
     SB.$("#mirrorToggle").classList.remove("is-on");
     var st = SB.$("#stageStatus");
-    if (st) { st.classList.remove("is-hands"); st.innerHTML = '<span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.'; }
-    refreshCapturePanelVisibility();
+    if (st) { st.classList.remove("is-hands"); st.innerHTML = '<span class="dot"></span>Demo engine â€” recognition is simulated so the full UI works before the model is trained.'; }
     setPill("demo");
   }
 
@@ -209,17 +258,21 @@ SB.TranslateView = function () {
       drawLandmarks: SB.settings.landmarks,
     }).then(function () {
       stage.classList.add("is-cam");
+      if (window.SignBridgeLiveTest) {
+        window.SignBridgeLiveTest.start();
+      }
       SB.$("#stageDemo").style.display = "none";
       SB.$("#mirrorToggle").classList.toggle("is-on", SB.settings.mirror);
       SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks);
       setPill("live");
       refreshCapturePanelVisibility();
       SB.toast(live().hasClassifier()
-        ? "Live engine on — hand tracking + your classifier"
-        : "Live engine on — hand landmarks tracking (attach a classifier to recognize)", "ok");
+        ? "Live engine on â€” hand tracking + your classifier"
+        : "Live engine on â€” hand landmarks tracking (attach a classifier to recognize)", "ok");
     }).catch(function (err) {
+      if (window.SignBridgeLiveTest) window.SignBridgeLiveTest.stop();
       setPill("demo", true);
-      SB.toast("Live mode needs a camera — " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
+      SB.toast("Live mode needs a camera â€” " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
       SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
     });
   }
@@ -243,7 +296,7 @@ SB.TranslateView = function () {
     });
   }
 
-  /* ---------- quick phrases (chips + hotkeys 1–9) ---------- */
+  /* ---------- quick phrases (chips + hotkeys 1â€“9) ---------- */
   function bindQuickPhrases() {
     var wrap = SB.$("#quickChips");
     SB.QUICK_PHRASES.forEach(function (p, i) {
@@ -286,7 +339,7 @@ SB.TranslateView = function () {
       transcript.endUtterance();
       var tokens = text.split("").map(function (ch) {
         if (!/^[A-Z0-9]$/.test(ch)) return null;
-        var glyph = /^[0-9]$/.test(ch) ? { "1": "☝️", "2": "✌️", "3": "🤟", "4": "🖖", "5": "🖐️" }[ch] || null : null;
+        var glyph = /^[0-9]$/.test(ch) ? { "1": "â˜ï¸", "2": "âœŒï¸", "3": "ðŸ¤Ÿ", "4": "ðŸ––", "5": "ðŸ–ï¸" }[ch] || null : null;
         return { text: ch, conf: 0.93, glyph: glyph };
       }).filter(Boolean);
       SB.Engine.signTokens(tokens, function (tok) {
