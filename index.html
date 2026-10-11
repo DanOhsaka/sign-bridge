@@ -86,6 +86,34 @@
 
         <div class="stage-status" id="stageStatus"><span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.</div>
 
+        <!-- LSTM training: record labeled landmark sequences (Live mode only) -->
+        <section class="capture-panel" id="capturePanel" hidden aria-label="Training data capture">
+          <div class="capture-head">
+            <h3>Record training data</h3>
+            <p class="capture-sub">Each take saves one labeled sequence of 63-float frames for LSTM training (<code>docs/MODELS.md</code>).</p>
+          </div>
+          <div class="capture-row">
+            <div class="field capture-field">
+              <label for="captureLabel">Class label</label>
+              <input class="input" id="captureLabel" type="text" maxlength="32" placeholder="e.g. A, HELLO, THANK_YOU" autocomplete="off">
+              <span class="hint">One sign per recording — repeat 100–200 times per class.</span>
+            </div>
+            <div class="capture-actions">
+              <button class="btn btn-soft" type="button" id="captureStart">● Record</button>
+              <button class="btn btn-ghost" type="button" id="captureStop" disabled>■ Stop &amp; save</button>
+              <button class="btn btn-ghost" type="button" id="captureCancel" disabled>Cancel take</button>
+            </div>
+          </div>
+          <div class="capture-meta">
+            <span id="captureStatus">Switch to Live mode to record.</span>
+            <span id="captureCounts">0 samples in memory</span>
+          </div>
+          <div class="capture-export">
+            <button class="btn btn-primary btn-sm" type="button" id="captureDownload">Download JSON dataset</button>
+            <button class="btn btn-ghost btn-sm" type="button" id="captureClear">Clear all samples</button>
+          </div>
+        </section>
+
         <!-- last recognised sign -->
         <div class="card spotlight" id="spotlight">
           <div class="spotlight-label">✨ Last signed</div>
@@ -185,6 +213,7 @@
   <script src="js/ui/transcript.js"></script>
   <script src="js/engine/recognizer.js"></script>
   <script src="js/engine/simulated.js"></script>
+  <script src="js/engine/capture.js"></script>
   <script src="js/engine/live.js"></script>
   <script src="js/views/translate.js"></script>
   <script src="js/views/settings.js"></script>

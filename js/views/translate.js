@@ -31,6 +31,14 @@ SB.TranslateView = function () {
     SB.Engine.on("hands", function (count) {
       var st = SB.$("#stageStatus");
       if (!st) return;
+      if (SB.DataCapture && SB.DataCapture.isRecording()) {
+        st.classList.add("is-hands");
+        var fc = SB.DataCapture.getCurrentFrameCount();
+        st.innerHTML = '<span class="dot"></span>' + (count > 0
+          ? "Recording training data — " + fc + " frames captured"
+          : "Recording — bring hand into view (" + fc + " frames so far)");
+        return;
+      }
       if (count > 0) {
         st.classList.add("is-hands");
         st.innerHTML = '<span class="dot"></span>Hand detected — ' +
@@ -49,7 +57,114 @@ SB.TranslateView = function () {
     bindSpellStrip();
     bindDemoActions();
     bindTranscriptActions();
+    bindCapturePanel();
     setPill("demo");
+    refreshCapturePanelVisibility();
+  }
+
+  /* ---------- LSTM training: labeled landmark sequences (SB.DataCapture) ---------- */
+  function bindCapturePanel() {
+    var panel = SB.$("#capturePanel");
+    if (!panel || !SB.DataCapture) return;
+
+    var labelInput = SB.$("#captureLabel");
+    var btnStart = SB.$("#captureStart");
+    var btnStop = SB.$("#captureStop");
+    var btnCancel = SB.$("#captureCancel");
+    var btnDownload = SB.$("#captureDownload");
+    var btnClear = SB.$("#captureClear");
+    var statusEl = SB.$("#captureStatus");
+    var countsEl = SB.$("#captureCounts");
+
+    function paintCaptureMeta(extra) {
+      var n = SB.DataCapture.getSampleCount();
+      countsEl.textContent = n + " sample" + (n === 1 ? "" : "s") + " in memory";
+      if (extra) statusEl.textContent = extra;
+    }
+
+    function setRecordingUI(active) {
+      panel.classList.toggle("is-recording", active);
+      statusEl.classList.toggle("is-recording", active);
+      btnStart.disabled = active;
+      btnStop.disabled = !active;
+      btnCancel.disabled = !active;
+      labelInput.disabled = active;
+    }
+
+    SB.DataCapture.setProgressListener(function (info) {
+      if (info.recording) {
+        statusEl.textContent = "Recording \"" + info.label + "\" — " + info.frameCount + " frames (keep hand in view)";
+      } else if (SB.Engine.getMode() === "live") {
+        statusEl.textContent = "Ready — perform one sign, then Stop & save.";
+      }
+      paintCaptureMeta();
+    });
+
+    btnStart.addEventListener("click", function () {
+      if (SB.Engine.getMode() !== "live") {
+        SB.toast("Switch to Live mode first (camera + landmarks).", "error");
+        return;
+      }
+      try {
+        SB.DataCapture.startRecording(labelInput.value);
+      } catch (err) {
+        SB.toast(err.message || "Enter a label.", "error");
+        return;
+      }
+      setRecordingUI(true);
+      statusEl.textContent = "Recording… move your hand into the frame.";
+      SB.toast("Recording — perform the sign once, then Stop & save.", "info");
+    });
+
+    btnStop.addEventListener("click", function () {
+      var result = SB.DataCapture.stopRecording({ minFrames: 8 });
+      setRecordingUI(false);
+      if (!result.ok) {
+        SB.toast(result.message, "error");
+        refreshCaptureIdleStatus();
+        return;
+      }
+      SB.toast("Saved \"" + result.sample.label + "\" (" + result.sample.length + " frames).", "ok");
+      refreshCaptureIdleStatus();
+      paintCaptureMeta();
+    });
+
+    btnCancel.addEventListener("click", function () {
+      SB.DataCapture.cancelRecording();
+      setRecordingUI(false);
+      refreshCaptureIdleStatus();
+      SB.toast("Recording cancelled — frames discarded.", "info");
+    });
+
+    btnDownload.addEventListener("click", function () {
+      var out = SB.DataCapture.downloadJSON();
+      if (!out.ok) { SB.toast(out.message, "error"); return; }
+      SB.toast("Downloaded " + out.sampleCount + " samples.", "ok");
+    });
+
+    btnClear.addEventListener("click", function () {
+      if (!SB.DataCapture.getSampleCount()) return;
+      SB.DataCapture.clearDataset();
+      paintCaptureMeta();
+      SB.toast("Cleared in-memory dataset.", "info");
+    });
+
+    function refreshCaptureIdleStatus() {
+      if (SB.Engine.getMode() !== "live") {
+        statusEl.textContent = "Switch to Live mode to record.";
+        return;
+      }
+      statusEl.textContent = "Ready — perform one sign, then Stop & save.";
+    }
+
+    refreshCaptureIdleStatus();
+    paintCaptureMeta();
+  }
+
+  function refreshCapturePanelVisibility() {
+    var panel = SB.$("#capturePanel");
+    if (!panel) return;
+    panel.hidden = SB.Engine.getMode() !== "live";
   }
 
   /* ---------- engine status pill (topbar) ---------- */
@@ -81,6 +196,7 @@ SB.TranslateView = function () {
     SB.$("#mirrorToggle").classList.remove("is-on");
     var st = SB.$("#stageStatus");
     if (st) { st.classList.remove("is-hands"); st.innerHTML = '<span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.'; }
+    refreshCapturePanelVisibility();
     setPill("demo");
   }
 
@@ -97,6 +213,7 @@ SB.TranslateView = function () {
       SB.$("#mirrorToggle").classList.toggle("is-on", SB.settings.mirror);
       SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks);
       setPill("live");
+      refreshCapturePanelVisibility();
       SB.toast(live().hasClassifier()
         ? "Live engine on — hand tracking + your classifier"
         : "Live engine on — hand landmarks tracking (attach a classifier to recognize)", "ok");

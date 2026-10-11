@@ -84,6 +84,32 @@
 .stage-status.is-hands .dot { background: var(--teal); box-shadow: 0 0 8px var(--teal); animation: pulse 1.4s infinite; }
 .stage-status.is-hands { color: var(--text-2); }
 
+/* LSTM landmark capture (Translate → Live mode) */
+.capture-panel {
+  padding: 16px 20px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+.capture-panel.is-recording {
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 90, .35);
+}
+.capture-head h3 { font-size: var(--fs-md); margin-bottom: 4px; }
+.capture-sub {
+  font-size: var(--fs-xs); color: var(--text-3); margin-bottom: 12px; line-height: 1.45;
+}
+.capture-sub code { font-size: 0.95em; }
+.capture-row {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+}
+.capture-field { flex: 1 1 200px; margin: 0; }
+.capture-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.capture-meta {
+  display: flex; flex-wrap: wrap; gap: 12px 20px;
+  margin-top: 12px; font-size: var(--fs-xs); color: var(--text-2);
+}
+.capture-meta #captureStatus.is-recording { color: var(--red); font-weight: 600; }
+.capture-export { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
 /* Spotlight: the last recognised sign, big and legible */
 .spotlight { margin: 16px 20px; padding: 16px 18px; display: grid; gap: 10px; }
 .spotlight-label {
