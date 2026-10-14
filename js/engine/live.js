@@ -809,15 +809,6 @@ SB.LiveEngine = function () {
       ctx.strokeText(label, tx, ty);
       ctx.fillText(label, tx, ty);
     }
-      ctx.strokeStyle = "rgba(6,10,20,.8)";
-
-      ctx.lineWidth = 1.5;
-
-      ctx.stroke();
-
-    });
-
-
 
     /* Red ring while saving training frames — visible feedback only */
 
