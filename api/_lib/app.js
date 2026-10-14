@@ -15,11 +15,16 @@ const cors = require("cors");
 
 const Database = require("./db");
 const authRoutes = require("./authRoutes");
+const predictRoutes = require("./predictRoutes");
 
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+
+// Registered before the database gate. A missing MongoDB
+// connection must not block sign recognition.
+app.use("/api/predict", predictRoutes);
 
 /* Liveness + connectivity probe. Registered BEFORE the connect middleware so
    it still answers when Mongo is unreachable — that is the point of it, and
