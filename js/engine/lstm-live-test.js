@@ -1,7 +1,8 @@
 (function () {
     "use strict";
 
-    const API_URL = "http://127.0.0.1:9001/predict";
+    // Node proxy on the same origin. The server forwards to the Python model.
+    const API_URL = "/api/predict";
     const SEQUENCE_LENGTH = 30;
 
     let active = false;

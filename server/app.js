@@ -10,6 +10,7 @@ const cors = require("cors");
 
 const Database = require("./db");
 const authRoutes = require("./routes/auth");
+const predictRoutes = require("./routes/predict");
 
 const app = express();
 
@@ -23,7 +24,11 @@ app.use(function (req, res, next) {
   }
   next();
 });
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
+
+// Registered before the database gate. A missing MongoDB
+// connection must not block sign recognition.
+app.use("/api/predict", predictRoutes);
 
 app.use("/api", async function (req, res, next) {
   try {
