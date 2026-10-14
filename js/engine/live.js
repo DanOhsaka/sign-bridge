@@ -6,9 +6,14 @@
    - Pose (shoulders, elbows, wrists)
    ============================================================ */
 
+
+
 window.SB = window.SB || {};
 
+
+
 SB.LiveEngine = function () {
+
   var self = this;
 
   var state = "off";
@@ -35,7 +40,6 @@ SB.LiveEngine = function () {
     return import(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/+esm"
     ).then(async function (visionModule) {
-
       var FilesetResolver = visionModule.FilesetResolver;
       var HolisticLandmarker = visionModule.HolisticLandmarker;
 
@@ -94,6 +98,7 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
 
   self.start = function (opts) {
+
     opts = opts || {};
 
     if (state === "starting" || state === "on") {
@@ -109,11 +114,13 @@ SB.LiveEngine = function () {
     drawLandmarksEnabled = opts.drawLandmarks !== false;
 
     if (!videoEl || !canvasEl) {
+
       state = "error";
       return Promise.reject(new Error("Video/canvas elements missing"));
     }
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+
       state = "error";
       return Promise.reject(
         new Error("Camera not available. Use HTTPS or localhost.")
@@ -291,6 +298,26 @@ SB.LiveEngine = function () {
       }
     }
 
+    // Forward every detected frame to training and LSTM consumers,
+    // independently of the optional single-hand classifier.
+    if (window.TrainingRecorder &&
+        typeof window.TrainingRecorder.processFrame === "function") {
+      try {
+        window.TrainingRecorder.processFrame(results, leftHand, rightHand);
+      } catch (err) {
+        console.error("Training recorder error:", err);
+      }
+    }
+
+    if (window.SignBridgeLiveTest &&
+        typeof window.SignBridgeLiveTest.processFrame === "function") {
+      try {
+        window.SignBridgeLiveTest.processFrame(results, leftHand, rightHand);
+      } catch (err) {
+        console.error("LSTM live test error:", err);
+      }
+    }
+
     printCoordinates(results, leftHand, rightHand);
   }
 
@@ -392,7 +419,6 @@ SB.LiveEngine = function () {
     if (!canvasEl || !videoEl) {
       return;
     }
-
     syncCanvasSize();
 
     var ctx = canvasEl.getContext("2d");
@@ -427,6 +453,7 @@ SB.LiveEngine = function () {
 
     // Draw lines between joints.
     ctx.lineWidth = 3;
+
     ctx.lineCap = "round";
     ctx.strokeStyle = "rgba(52, 224, 192, .55)";
 
@@ -460,9 +487,27 @@ SB.LiveEngine = function () {
       ctx.fill();
 
       ctx.strokeStyle = "rgba(6,10,20,.8)";
+
       ctx.lineWidth = 1.5;
+
       ctx.stroke();
+
     });
+
+
+
+    /* Red ring while saving training frames — visible feedback only */
+
+    if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" && SB.DataCapture.isRecording()) {
+
+      ctx.strokeStyle = "rgba(255, 90, 90, .85)";
+
+      ctx.lineWidth = 4;
+
+      ctx.strokeRect(8, 8, canvasEl.width - 16, canvasEl.height - 16);
+
+    }
+
   }
 
   // ----------------------------------------------------------

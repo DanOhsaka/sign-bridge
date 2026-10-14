@@ -1,7 +1,7 @@
 /* ============================================================
-   SignBridge — Translate view (translate.js)
+   SignBridge â€” Translate view (translate.js)
    ------------------------------------------------------------
-   Two-column learning arc: signing space (left) ↔ live
+   Two-column learning arc: signing space (left) â†” live
    transcript (right). Everything the learner does here lands in
    the transcript, where confidence and alternates make the
    machine's "reading" visible and correctable.
@@ -12,6 +12,8 @@ window.SB = window.SB || {};
 SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
+  var lastPrediction = null;
+  var lastPredictionTime = 0;
 
   function live() { return SB.Engine.getLiveEngine(); }
 
@@ -27,10 +29,63 @@ SB.TranslateView = function () {
       }
     });
 
-    /* hand-presence → status line pulse */
+    // Receive predictions from the Python LSTM service.
+    window.addEventListener(
+      "signbridge:lstm-prediction",
+      function (event) {
+
+        // Only update the interface in Live mode.
+        if (SB.Engine.getMode() !== "live") {
+          return;
+        }
+
+        var result = event.detail;
+
+        if (!result || !result.prediction) {
+          return;
+        }
+
+        var now = Date.now();
+              
+        if (
+          result.prediction === lastPrediction &&
+          now - lastPredictionTime < 2000
+        ) {
+          return;
+        }
+        
+        lastPrediction = result.prediction;
+        lastPredictionTime = now;
+
+        var token = {
+          text: result.prediction,
+          conf: result.confidence
+        };
+
+        transcript.addToken(token);
+        spotlight.show(token);
+        transcript.endUtterance();
+
+        console.log(
+          "SignBridge transcript updated:",
+          token.text
+        );
+      }
+    );
+
+
+    /* hand-presence â†’ status line pulse */
     SB.Engine.on("hands", function (count) {
       var st = SB.$("#stageStatus");
       if (!st) return;
+      if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" && SB.DataCapture.isRecording()) {
+        st.classList.add("is-hands");
+        var fc = SB.DataCapture.getCurrentFrameCount();
+        st.innerHTML = '<span class="dot"></span>' + (count > 0
+          ? "Recording training data — " + fc + " frames captured"
+          : "Recording — bring hand into view (" + fc + " frames so far)");
+        return;
+      }
       if (count > 0) {
         st.classList.add("is-hands");
         var overlayOn = SB.settings.landmarks !== false;
@@ -40,9 +95,10 @@ SB.TranslateView = function () {
             : (overlayOn
               ? "landmark overlay on. Attach your classifier to start recognizing (see docs/MODELS.md)."
               : "tracking, but overlay is off — turn on Landmarks to see the skeleton."));
+
       } else {
         st.classList.remove("is-hands");
-        st.innerHTML = '<span class="dot"></span>Move a hand into view…';
+        st.innerHTML = '<span class="dot"></span>Move a hand into viewâ€¦';
       }
     });
 
@@ -52,12 +108,120 @@ SB.TranslateView = function () {
     bindSpellStrip();
     bindDemoActions();
     bindTranscriptActions();
+    bindCapturePanel();
     setPill("demo");
-    /* Reflect saved toggle state even before Live starts */
+    refreshCapturePanelVisibility();
+    /* Reflect saved toggle state even before Live starts. */
     var lmChip = SB.$("#landmarkToggle");
     var mirChip = SB.$("#mirrorToggle");
     if (lmChip) lmChip.classList.toggle("is-on", SB.settings.landmarks !== false);
     if (mirChip) mirChip.classList.toggle("is-on", !!SB.settings.mirror);
+  }
+
+  /* ---------- LSTM training: labeled landmark sequences (SB.DataCapture) ---------- */
+  function bindCapturePanel() {
+    var panel = SB.$("#capturePanel");
+    if (!panel || !SB.DataCapture) return;
+
+    var labelInput = SB.$("#captureLabel");
+    var btnStart = SB.$("#captureStart");
+    var btnStop = SB.$("#captureStop");
+    var btnCancel = SB.$("#captureCancel");
+    var btnDownload = SB.$("#captureDownload");
+    var btnClear = SB.$("#captureClear");
+    var statusEl = SB.$("#captureStatus");
+    var countsEl = SB.$("#captureCounts");
+
+    function paintCaptureMeta(extra) {
+      var n = SB.DataCapture.getSampleCount();
+      countsEl.textContent = n + " sample" + (n === 1 ? "" : "s") + " in memory";
+      if (extra) statusEl.textContent = extra;
+    }
+
+    function setRecordingUI(active) {
+      panel.classList.toggle("is-recording", active);
+      statusEl.classList.toggle("is-recording", active);
+      btnStart.disabled = active;
+      btnStop.disabled = !active;
+      btnCancel.disabled = !active;
+      labelInput.disabled = active;
+    }
+
+    SB.DataCapture.setProgressListener(function (info) {
+      if (info.recording) {
+        statusEl.textContent = "Recording \"" + info.label + "\" — " + info.frameCount + " frames (keep hand in view)";
+      } else if (SB.Engine.getMode() === "live") {
+        statusEl.textContent = "Ready — perform one sign, then Stop & save.";
+      }
+      paintCaptureMeta();
+    });
+
+    btnStart.addEventListener("click", function () {
+      if (SB.Engine.getMode() !== "live") {
+        SB.toast("Switch to Live mode first (camera + landmarks).", "error");
+        return;
+      }
+      try {
+        SB.DataCapture.startRecording(labelInput.value);
+      } catch (err) {
+        SB.toast(err.message || "Enter a label.", "error");
+        return;
+      }
+      setRecordingUI(true);
+      statusEl.textContent = "Recording… move your hand into the frame.";
+      SB.toast("Recording — perform the sign once, then Stop & save.", "info");
+    });
+
+    btnStop.addEventListener("click", function () {
+      var result = SB.DataCapture.stopRecording({ minFrames: 8 });
+      setRecordingUI(false);
+      if (!result.ok) {
+        SB.toast(result.message, "error");
+        refreshCaptureIdleStatus();
+        return;
+      }
+      SB.toast("Saved \"" + result.sample.label + "\" (" + result.sample.length + " frames).", "ok");
+      refreshCaptureIdleStatus();
+      paintCaptureMeta();
+    });
+
+    btnCancel.addEventListener("click", function () {
+      SB.DataCapture.cancelRecording();
+      setRecordingUI(false);
+      refreshCaptureIdleStatus();
+      SB.toast("Recording cancelled — frames discarded.", "info");
+    });
+
+    btnDownload.addEventListener("click", function () {
+      var out = SB.DataCapture.downloadJSON();
+      if (!out.ok) { SB.toast(out.message, "error"); return; }
+      SB.toast("Downloaded " + out.sampleCount + " samples.", "ok");
+    });
+
+    btnClear.addEventListener("click", function () {
+      if (!SB.DataCapture.getSampleCount()) return;
+      SB.DataCapture.clearDataset();
+      paintCaptureMeta();
+      SB.toast("Cleared in-memory dataset.", "info");
+    });
+
+    function refreshCaptureIdleStatus() {
+      if (SB.Engine.getMode() !== "live") {
+        statusEl.textContent = "Switch to Live mode to record.";
+        return;
+      }
+      statusEl.textContent = "Ready — perform one sign, then Stop & save.";
+    }
+
+    refreshCaptureIdleStatus();
+    paintCaptureMeta();
+  }
+
+  function refreshCapturePanelVisibility() {
+    var panel = SB.$("#capturePanel");
+    if (!panel) return;
+    panel.hidden = SB.Engine.getMode() !== "live";
+
   }
 
   /* ---------- engine status pill (topbar) ---------- */
@@ -65,7 +229,7 @@ SB.TranslateView = function () {
     var pill = SB.$("#enginePill");
     if (!pill) return;
     pill.className = "engine-pill is-" + (err ? "error" : mode);
-    SB.$(".pill-text", pill).textContent = err ? "Camera unavailable" : (mode === "live" ? "Live · model ready" : "Demo · simulated");
+    SB.$(".pill-text", pill).textContent = err ? "Camera unavailable" : (mode === "live" ? "Live · " + (live().hasClassifier() ? "model ready" : "tracking") : "Demo Â· simulated");
   }
 
   /* ---------- Demo / Live mode switch ---------- */
@@ -102,6 +266,9 @@ SB.TranslateView = function () {
   }
 
   function goDemo() {
+    if (window.SignBridgeLiveTest) {
+      window.SignBridgeLiveTest.stop();
+    }
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
     var stage = SB.$("#stage");
@@ -114,7 +281,9 @@ SB.TranslateView = function () {
       st.classList.remove("is-hands");
       st.innerHTML = '<span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.';
     }
+
     setPill("demo");
+    refreshCapturePanelVisibility();
   }
 
   function goLive() {
@@ -133,20 +302,30 @@ SB.TranslateView = function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
+      if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.start === "function") {
+        window.SignBridgeLiveTest.start();
+      }
+
       SB.$("#mirrorToggle").classList.toggle("is-on", SB.settings.mirror);
       SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks);
       if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
       if (live().setMirror) live().setMirror(SB.settings.mirror);
       setPill("live");
+      refreshCapturePanelVisibility();
       if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
+
       SB.toast(live().hasClassifier()
-        ? "Live engine on — hand tracking + your classifier"
-        : "Live engine on — hand landmarks tracking (attach a classifier to recognize)", "ok");
+        ? "Live engine on â€” hand tracking + your classifier"
+        : "Live engine on â€” hand landmarks tracking (attach a classifier to recognize)", "ok");
     }).catch(function (err) {
+      if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.stop === "function") {
+        window.SignBridgeLiveTest.stop();
+      }
       setStageOverlay("error", "Camera unavailable",
         (err && err.message ? err.message : "Permission denied or no camera found.") + " You can stay in Demo mode.");
+
       setPill("demo", true);
-      SB.toast("Live mode needs a camera — " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
+      SB.toast("Live mode needs a camera â€” " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
       SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
       setTimeout(function () {
         setStageOverlay(null);
@@ -187,7 +366,7 @@ SB.TranslateView = function () {
     });
   }
 
-  /* ---------- quick phrases (chips + hotkeys 1–9) ---------- */
+  /* ---------- quick phrases (chips + hotkeys 1â€“9) ---------- */
   function bindQuickPhrases() {
     var wrap = SB.$("#quickChips");
     SB.QUICK_PHRASES.forEach(function (p, i) {
@@ -230,7 +409,7 @@ SB.TranslateView = function () {
       transcript.endUtterance();
       var tokens = text.split("").map(function (ch) {
         if (!/^[A-Z0-9]$/.test(ch)) return null;
-        var glyph = /^[0-9]$/.test(ch) ? { "1": "☝️", "2": "✌️", "3": "🤟", "4": "🖖", "5": "🖐️" }[ch] || null : null;
+        var glyph = /^[0-9]$/.test(ch) ? { "1": "â˜ï¸", "2": "âœŒï¸", "3": "ðŸ¤Ÿ", "4": "ðŸ––", "5": "ðŸ–ï¸" }[ch] || null : null;
         return { text: ch, conf: 0.93, glyph: glyph };
       }).filter(Boolean);
       SB.Engine.signTokens(tokens, function (tok) {

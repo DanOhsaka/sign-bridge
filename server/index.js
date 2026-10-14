@@ -1,7 +1,8 @@
 /* ============================================================
    SignBridge — local API + static host
-   Boots Mongo via Database.getInstance(), then serves HTML/CSS/JS
-   and /api/auth/*. On Vercel this file is not used; see /api.
+   Serves HTML/CSS/JS, /api/auth/*, and /api/predict.
+   Mongo is required for auth. Prediction still starts if the
+   database is down. On Vercel this file is not used; see /api.
    ============================================================ */
 
 const path = require("path");
@@ -22,9 +23,13 @@ async function start() {
     throw new Error("JWT_SECRET is missing. Copy server/.env.example to server/.env");
   }
 
-  var db = Database.getInstance();
-  await db.connect(process.env.MONGODB_URI);
-  console.log("MongoDB connected (singleton)");
+  try {
+    await Database.getInstance().connect(process.env.MONGODB_URI);
+    console.log("MongoDB connected (singleton)");
+  } catch (err) {
+    console.warn("MongoDB unavailable. Auth routes will fail until it is up.");
+    console.warn(err.message || err);
+  }
 
   app.listen(PORT, function () {
     console.log("SignBridge on http://localhost:" + PORT);
