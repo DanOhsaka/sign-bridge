@@ -189,12 +189,19 @@ SB.LiveEngine = function () {
       stats.inferMs = msg.inferMs || 0;
       lastInferEndMs = performance.now();
       inferFrameCount++;
-      ingestResults(
-        { landmarks: msg.landmarks, handednesses: msg.handednesses },
-        lastInferEndMs,
-        msg.mediaMs
-      );
-      inferenceBusy = false;
+      try {
+        ingestResults(
+          { landmarks: msg.landmarks, handednesses: msg.handednesses },
+          lastInferEndMs,
+          msg.mediaMs
+        );
+      } catch (err) {
+        console.error("ingestResults error:", err);
+      } finally {
+        /* Always clear, even if ingest throws: a stranded busy gate drops
+           every later frame and inference never runs again. */
+        inferenceBusy = false;
+      }
       return;
     }
     if (msg.type === "error") {
@@ -604,7 +611,7 @@ SB.LiveEngine = function () {
     if (window.TrainingRecorder &&
         typeof window.TrainingRecorder.processFrame === "function") {
       try {
-        window.TrainingRecorder.processFrame(results, leftHand, rightHand);
+        window.TrainingRecorder.processFrame(results, left, right);
       } catch (err) {
         console.error("Training recorder error:", err);
       }
@@ -613,13 +620,11 @@ SB.LiveEngine = function () {
     if (window.SignBridgeLiveTest &&
         typeof window.SignBridgeLiveTest.processFrame === "function") {
       try {
-        window.SignBridgeLiveTest.processFrame(results, leftHand, rightHand);
+        window.SignBridgeLiveTest.processFrame(results, left, right);
       } catch (err) {
         console.error("LSTM live test error:", err);
       }
     }
-
-    printCoordinates(results, leftHand, rightHand);
   }
 
   function handednessLabel(entry) {
