@@ -78,7 +78,7 @@ SB.TranslateView = function () {
     SB.Engine.on("hands", function (count) {
       var st = SB.$("#stageStatus");
       if (!st) return;
-      if (SB.DataCapture && SB.DataCapture.isRecording()) {
+      if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" && SB.DataCapture.isRecording()) {
         st.classList.add("is-hands");
         var fc = SB.DataCapture.getCurrentFrameCount();
         st.innerHTML = '<span class="dot"></span>' + (count > 0
@@ -88,10 +88,14 @@ SB.TranslateView = function () {
       }
       if (count > 0) {
         st.classList.add("is-hands");
-        st.innerHTML = '<span class="dot"></span>Hand detected â€” ' +
+        var overlayOn = SB.settings.landmarks !== false;
+        st.innerHTML = '<span class="dot"></span>Hand detected — ' +
           (live().hasClassifier()
-            ? "recognizingâ€¦"
-            : "landmarks tracking. Attach your classifier to start recognizing (see docs/MODELS.md).");
+            ? "recognizing…"
+            : (overlayOn
+              ? "landmark overlay on. Attach your classifier to start recognizing (see docs/MODELS.md)."
+              : "tracking, but overlay is off — turn on Landmarks to see the skeleton."));
+
       } else {
         st.classList.remove("is-hands");
         st.innerHTML = '<span class="dot"></span>Move a hand into viewâ€¦';
@@ -107,6 +111,11 @@ SB.TranslateView = function () {
     bindCapturePanel();
     setPill("demo");
     refreshCapturePanelVisibility();
+    /* Reflect saved toggle state even before Live starts. */
+    var lmChip = SB.$("#landmarkToggle");
+    var mirChip = SB.$("#mirrorToggle");
+    if (lmChip) lmChip.classList.toggle("is-on", SB.settings.landmarks !== false);
+    if (mirChip) mirChip.classList.toggle("is-on", !!SB.settings.mirror);
   }
 
   /* ---------- LSTM training: labeled landmark sequences (SB.DataCapture) ---------- */
@@ -212,6 +221,7 @@ SB.TranslateView = function () {
     var panel = SB.$("#capturePanel");
     if (!panel) return;
     panel.hidden = SB.Engine.getMode() !== "live";
+
   }
 
   /* ---------- engine status pill (topbar) ---------- */
@@ -219,7 +229,7 @@ SB.TranslateView = function () {
     var pill = SB.$("#enginePill");
     if (!pill) return;
     pill.className = "engine-pill is-" + (err ? "error" : mode);
-    SB.$(".pill-text", pill).textContent = err ? "Camera unavailable" : (mode === "live" ? "Live Â· model ready" : "Demo Â· simulated");
+    SB.$(".pill-text", pill).textContent = err ? "Camera unavailable" : (mode === "live" ? "Live · " + (live().hasClassifier() ? "model ready" : "tracking") : "Demo Â· simulated");
   }
 
   /* ---------- Demo / Live mode switch ---------- */
@@ -235,45 +245,94 @@ SB.TranslateView = function () {
     });
   }
 
+  function setStageOverlay(kind, title, detail) {
+    var stage = SB.$("#stage");
+    var overlay = SB.$("#stageOverlay");
+    if (!stage) return;
+    stage.classList.remove("is-starting", "is-error");
+    if (!kind) {
+      if (overlay) overlay.hidden = true;
+      return;
+    }
+    stage.classList.add(kind === "error" ? "is-error" : "is-starting");
+    if (!overlay) return;
+    overlay.hidden = false;
+    var titleEl = SB.$(".overlay-title", overlay);
+    var detailEl = SB.$(".overlay-detail", overlay);
+    var spin = SB.$(".spinner", overlay);
+    if (titleEl) titleEl.textContent = title || "";
+    if (detailEl) detailEl.textContent = detail || "";
+    if (spin) spin.style.display = kind === "starting" ? "" : "none";
+  }
+
   function goDemo() {
     if (window.SignBridgeLiveTest) {
       window.SignBridgeLiveTest.stop();
     }
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
-    SB.$("#stage").classList.remove("is-cam");
+    var stage = SB.$("#stage");
+    stage.classList.remove("is-cam", "is-mirror");
+    setStageOverlay(null);
     SB.$("#stageDemo").style.display = "";
     SB.$("#mirrorToggle").classList.remove("is-on");
     var st = SB.$("#stageStatus");
-    if (st) { st.classList.remove("is-hands"); st.innerHTML = '<span class="dot"></span>Demo engine â€” recognition is simulated so the full UI works before the model is trained.'; }
+    if (st) {
+      st.classList.remove("is-hands");
+      st.innerHTML = '<span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.';
+    }
+
     setPill("demo");
+    refreshCapturePanelVisibility();
   }
 
   function goLive() {
     var stage = SB.$("#stage");
+    SB.$("#stageDemo").style.display = "none";
+    setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
+    var st = SB.$("#stageStatus");
+    if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
+
     SB.Engine.setMode("live", {
       videoEl: SB.$("#cam"),
       canvasEl: SB.$("#overlay"),
       mirror: SB.settings.mirror,
       drawLandmarks: SB.settings.landmarks,
     }).then(function () {
+      setStageOverlay(null);
       stage.classList.add("is-cam");
-      if (window.SignBridgeLiveTest) {
+      stage.classList.toggle("is-mirror", !!SB.settings.mirror);
+      if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();
       }
-      SB.$("#stageDemo").style.display = "none";
+
       SB.$("#mirrorToggle").classList.toggle("is-on", SB.settings.mirror);
       SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks);
+      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
+      if (live().setMirror) live().setMirror(SB.settings.mirror);
       setPill("live");
       refreshCapturePanelVisibility();
+      if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
+
       SB.toast(live().hasClassifier()
         ? "Live engine on â€” hand tracking + your classifier"
         : "Live engine on â€” hand landmarks tracking (attach a classifier to recognize)", "ok");
     }).catch(function (err) {
-      if (window.SignBridgeLiveTest) window.SignBridgeLiveTest.stop();
+      if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.stop === "function") {
+        window.SignBridgeLiveTest.stop();
+      }
+      setStageOverlay("error", "Camera unavailable",
+        (err && err.message ? err.message : "Permission denied or no camera found.") + " You can stay in Demo mode.");
+
       setPill("demo", true);
       SB.toast("Live mode needs a camera â€” " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
       SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
+      setTimeout(function () {
+        setStageOverlay(null);
+        goDemo();
+        SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
+        if (SB._moveSegTrack) SB._moveSegTrack();
+      }, 2200);
     });
   }
 
@@ -284,6 +343,9 @@ SB.TranslateView = function () {
       SB.settings.mirror = !SB.settings.mirror;
       SB.saveSettings();
       mirrorBtn.classList.toggle("is-on", SB.settings.mirror);
+      var stage = SB.$("#stage");
+      if (stage) stage.classList.toggle("is-mirror", !!SB.settings.mirror && stage.classList.contains("is-cam"));
+      if (live().setMirror) live().setMirror(SB.settings.mirror);
       SB.toast("Mirror mode " + (SB.settings.mirror ? "on" : "off"), "info");
     });
 
@@ -292,6 +354,14 @@ SB.TranslateView = function () {
       SB.settings.landmarks = !SB.settings.landmarks;
       SB.saveSettings();
       lmBtn.classList.toggle("is-on", SB.settings.landmarks);
+      /* Must update the running LiveEngine — settings alone don't redraw */
+      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
+      var st = SB.$("#stageStatus");
+      if (st && st.classList.contains("is-hands")) {
+        st.innerHTML = SB.settings.landmarks
+          ? '<span class="dot"></span>Hand detected — landmark overlay on.'
+          : '<span class="dot"></span>Hand detected — overlay off (turn on Landmarks to see the skeleton).';
+      }
       SB.toast("Landmark overlay " + (SB.settings.landmarks ? "on" : "off"), "info");
     });
   }

@@ -1,1 +1,2 @@
-module.exports = require("../../server/vercel-handler")("/api/auth/register");
+/* POST /api/auth/register — creates an account, returns {user, token}. */
+module.exports = require("../_lib/app");

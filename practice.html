@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
   <title>SignBridge — Practice</title>
   <meta name="description" content="SignBridge practice arena — letters, minimal pairs, spaced review.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
@@ -11,6 +12,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles/main.css">
   <link rel="stylesheet" href="styles/views.css">
+  <link rel="stylesheet" href="styles/polish.css">
 </head>
 <body data-view="practice">
 
@@ -25,12 +27,25 @@
         </span>
       </a>
       <nav class="nav" aria-label="Main">
-        <a data-nav="translate" href="index.html">Translate</a>
-        <a data-nav="practice" href="practice.html">Practice</a>
-        <a data-nav="learn" href="learn.html">Learn</a>
+        <div class="nav-pill" id="navPill"></div>
+        <a data-nav="translate" href="index.html" title="Live sign → text">Translate</a>
+        <a data-nav="practice" href="practice.html" title="Test your signing skills">Practice</a>
+        <a data-nav="learn" href="learn.html" title="Explore ASL vocabulary">Learn</a>
       </nav>
       <div class="topbar-actions">
-        <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme">☾</button>
+        <div class="theme-switch" id="themeSwitch" title="Toggle theme" role="switch" aria-label="Toggle theme" style="cursor:pointer">
+          <div class="ts-track">
+            <div class="ts-pill" id="tsPill"></div>
+            <div class="ts-opt ts-dark">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              Dark
+            </div>
+            <div class="ts-opt ts-light">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+              Light
+            </div>
+          </div>
+        </div>
         <button class="icon-btn" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
         <div id="authSlot" class="auth-slot">
           <a class="chip" href="login.html">Log in</a>
@@ -68,10 +83,12 @@
               </div>
             </div>
 
-            <div class="feedback" id="feedback" role="status"></div>
+            <div class="feedback" id="feedback" role="status">
+              <div><strong>Waiting for your answer…</strong><p>Press the matching letter on your keyboard, or tap the pad below.</p></div>
+            </div>
 
             <div>
-              <div class="q-label" style="margin-bottom:8px">Letter pad — click or press the key</div>
+              <div class="q-label" style="margin-bottom:8px">Letter pad — click or press the matching key on your keyboard</div>
               <div class="letter-pad" id="letterPad"></div>
             </div>
           </div>
@@ -113,11 +130,16 @@
           </div>
         </div>
 
-        <div class="card card-pad" style="margin-top:20px">
-          <div class="section-title" style="font-size:16px">Minimal pairs — the classic confusion traps</div>
-          <p class="section-sub">These look almost identical. The recognizer gets them wrong too — which is why the UI teaches them.</p>
-          <div class="minipair-list" id="minipairList"></div>
-        </div>
+        <details class="help-panel">
+          <summary>
+            Need help? Confusing letter pairs
+            <small>Compare look-alikes like J vs Z →</small>
+          </summary>
+          <div class="help-body">
+            <p class="section-sub" style="margin-bottom:12px">These look almost identical. The recognizer gets them wrong too — which is why practice teaches them.</p>
+            <div class="minipair-list" id="minipairList"></div>
+          </div>
+        </details>
       </div>
 
       <!-- ══════════ Phrases pane ══════════ -->

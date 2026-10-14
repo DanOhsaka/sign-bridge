@@ -1,14 +1,10 @@
 {
   "name": "sign-bridge",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "private": true,
-  "description": "SignBridge — live sign translator + auth API",
-  "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch server/index.js"
-  },
+  "description": "SignBridge — static site plus Vercel Functions API. See docs/DEPLOY.md.",
   "engines": {
-    "node": ">=18"
+    "node": "24.x"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",

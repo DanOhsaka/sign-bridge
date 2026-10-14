@@ -1,1 +1,2 @@
-module.exports = require("../server/vercel-handler")("/api/health");
+/* GET /api/health — liveness + Mongo connectivity probe. */
+module.exports = require("./_lib/app");

@@ -1,5 +1,5 @@
 /* ============================================================
-   SignBridge â€” Live MediaPipe Engine
+   SignBridge — Live MediaPipe Engine
    Uses MediaPipe HolisticLandmarker for:
    - Left hand
    - Right hand
@@ -40,7 +40,6 @@ SB.LiveEngine = function () {
     return import(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/+esm"
     ).then(async function (visionModule) {
-
       var FilesetResolver = visionModule.FilesetResolver;
       var HolisticLandmarker = visionModule.HolisticLandmarker;
 
@@ -64,8 +63,6 @@ SB.LiveEngine = function () {
     });
   }
 
-
-
   // ----------------------------------------------------------
   // Existing LiveEngine API
   // ----------------------------------------------------------
@@ -80,6 +77,20 @@ SB.LiveEngine = function () {
 
   self.getState = function () {
     return state;
+  };
+
+  /* Runtime toggles (Translate chips / settings) */
+  self.setDrawLandmarks = function (on) {
+    drawLandmarksEnabled = !!on;
+    if (!drawLandmarksEnabled) clearCanvas();
+  };
+
+  self.setMirror = function (on) {
+    mirror = !!on;
+  };
+
+  self.getDrawLandmarks = function () {
+    return drawLandmarksEnabled;
   };
 
   // ----------------------------------------------------------
@@ -155,8 +166,7 @@ SB.LiveEngine = function () {
       })
 
       .then(function () {
-        canvasEl.width = videoEl.videoWidth || 640;
-        canvasEl.height = videoEl.videoHeight || 480;
+        syncCanvasSize();
 
         lastVideoTime = -1;
         running = true;
@@ -284,33 +294,30 @@ SB.LiveEngine = function () {
           if (SB.Engine && SB.Engine._result) {
             SB.Engine._result(token);
           }
-
         }
       }
     }
 
-          if (
-          window.TrainingRecorder &&
-          TrainingRecorder.processFrame
-      ) {
-        TrainingRecorder.processFrame(
-          results,
-          leftHand,
-          rightHand
-        );
+    // Forward every detected frame to training and LSTM consumers,
+    // independently of the optional single-hand classifier.
+    if (window.TrainingRecorder &&
+        typeof window.TrainingRecorder.processFrame === "function") {
+      try {
+        window.TrainingRecorder.processFrame(results, leftHand, rightHand);
+      } catch (err) {
+        console.error("Training recorder error:", err);
       }
-      
-      if (
-          window.SignBridgeLiveTest &&
-          typeof SignBridgeLiveTest.processFrame === "function"
-      ) {
-          SignBridgeLiveTest.processFrame(
-              results,
-              leftHand,
-              rightHand
-          );
+    }
+
+    if (window.SignBridgeLiveTest &&
+        typeof window.SignBridgeLiveTest.processFrame === "function") {
+      try {
+        window.SignBridgeLiveTest.processFrame(results, leftHand, rightHand);
+      } catch (err) {
+        console.error("LSTM live test error:", err);
       }
-      
+    }
+
     printCoordinates(results, leftHand, rightHand);
   }
 
@@ -371,6 +378,21 @@ SB.LiveEngine = function () {
   ];
 
   // ----------------------------------------------------------
+  // Keep canvas bitmap size in sync with the displayed video box
+  // so landmarks stay aligned under object-fit / responsive layout.
+  // ----------------------------------------------------------
+
+  function syncCanvasSize() {
+    if (!canvasEl || !videoEl) return;
+    var w = videoEl.clientWidth || videoEl.videoWidth || 640;
+    var h = videoEl.clientHeight || videoEl.videoHeight || 480;
+    if (canvasEl.width !== w || canvasEl.height !== h) {
+      canvasEl.width = w;
+      canvasEl.height = h;
+    }
+  }
+
+  // ----------------------------------------------------------
   // Clear overlay
   // ----------------------------------------------------------
 
@@ -397,6 +419,7 @@ SB.LiveEngine = function () {
     if (!canvasEl || !videoEl) {
       return;
     }
+    syncCanvasSize();
 
     var ctx = canvasEl.getContext("2d");
 
@@ -417,16 +440,15 @@ SB.LiveEngine = function () {
   }
 
   function drawHand(ctx, landmarks) {
+    var w = canvasEl.width;
+    var h = canvasEl.height;
+
     var points = landmarks.map(function (point) {
-      var x = point.x * canvasEl.width;
-      var y = point.y * canvasEl.height;
-
-      
-
-      return {
-        x: x,
-        y: y
-      };
+      var x = point.x * w;
+      var y = point.y * h;
+      /* Mirror overlay to match CSS-mirrored video */
+      if (mirror) x = w - x;
+      return { x: x, y: y };
     });
 
     // Draw lines between joints.
@@ -438,6 +460,7 @@ SB.LiveEngine = function () {
     HAND_CONNECTIONS.forEach(function (connection) {
       var start = points[connection[0]];
       var end = points[connection[1]];
+      if (!start || !end) return;
 
       ctx.beginPath();
       ctx.moveTo(start.x, start.y);
@@ -475,7 +498,7 @@ SB.LiveEngine = function () {
 
     /* Red ring while saving training frames — visible feedback only */
 
-    if (SB.DataCapture && SB.DataCapture.isRecording()) {
+    if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" && SB.DataCapture.isRecording()) {
 
       ctx.strokeStyle = "rgba(255, 90, 90, .85)";
 
@@ -486,8 +509,6 @@ SB.LiveEngine = function () {
     }
 
   }
-
-
 
   // ----------------------------------------------------------
   // Convert one hand into the existing 63-number format
