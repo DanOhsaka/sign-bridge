@@ -11,12 +11,18 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const app = require("./app");
 const Database = require("./db");
 
-function createHandler(canonicalPath) {
+function createHandler(canonicalPath, options) {
+  options = options || {};
+
   return async function (req, res) {
     var url = String(req.url || "");
     if (!url.startsWith("/api")) {
       var query = url.indexOf("?") >= 0 ? url.slice(url.indexOf("?")) : "";
       req.url = canonicalPath + query;
+    }
+
+    if (options.skipDatabase) {
+      return app(req, res);
     }
 
     try {
