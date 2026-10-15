@@ -108,7 +108,7 @@ SB.PracticeView = function () {
     var fb = SB.$("#feedback");
     if (!fb) return;
     fb.className = "feedback";
-    fb.innerHTML = "<div><strong>Waiting for your answer…</strong><p>Press the matching letter on your keyboard, or tap the pad below.</p></div>";
+    fb.innerHTML = "<div><strong>Waiting for your answer…</strong><p>" + (SB.Device && SB.Device.isMobile ? "Tap the matching letter on the pad below." : "Press the matching letter on your keyboard, or tap the pad below.") + "</p></div>";
   }
 
   function showFeedback(kind, html) {

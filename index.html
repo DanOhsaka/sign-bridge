@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="js/device.js"></script>
   <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
   <title>SignBridge — Live Translate</title>
   <meta name="description" content="SignBridge — a live sign-language translator and learning companion.">
@@ -129,6 +130,34 @@
 
       <div class="stage-status" id="stageStatus"><span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.</div>
 
+      <!-- LSTM training: record labeled landmark sequences (Live mode only) -->
+      <section class="capture-panel" id="capturePanel" hidden aria-label="Training data capture">
+        <div class="capture-head">
+          <h3>Record training data</h3>
+          <p class="capture-sub">Each take saves one labeled sequence of 63-float frames for LSTM training (<code>docs/MODELS.md</code>).</p>
+        </div>
+        <div class="capture-row">
+          <div class="field capture-field">
+            <label for="captureLabel">Class label</label>
+            <input class="input" id="captureLabel" type="text" maxlength="32" placeholder="e.g. A, HELLO, THANK_YOU" autocomplete="off">
+            <span class="hint">One sign per recording — repeat 100–200 times per class.</span>
+          </div>
+          <div class="capture-actions">
+            <button class="btn btn-soft" type="button" id="captureStart">● Record</button>
+            <button class="btn btn-ghost" type="button" id="captureStop" disabled>■ Stop &amp; save</button>
+            <button class="btn btn-ghost" type="button" id="captureCancel" disabled>Cancel take</button>
+          </div>
+        </div>
+        <div class="capture-meta">
+          <span id="captureStatus">Switch to Live mode to record.</span>
+          <span id="captureCounts">0 samples in memory</span>
+        </div>
+        <div class="capture-export">
+          <button class="btn btn-primary btn-sm" type="button" id="captureDownload">Download JSON dataset</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="captureClear">Clear all samples</button>
+        </div>
+      </section>
+
       <div class="card spotlight" id="spotlight">
         <div class="spotlight-label">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
@@ -232,6 +261,7 @@
 <script src="js/training/storage.js"></script>
 <script src="js/training/training.js"></script>
 <script src="./js/engine/lstm-live-test.js"></script>
+<script src="js/engine/capture.js"></script>
 <script src="js/engine/live.js"></script>
 <script src="js/views/translate.js"></script>
 <script src="js/views/settings.js"></script>

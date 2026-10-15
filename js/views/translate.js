@@ -19,6 +19,7 @@ SB.TranslateView = function () {
 
   function init() {
     transcript = new SB.Transcript(SB.$("#transcript"));
+    if (SB.Captions) SB.Captions.attach(transcript);   /* phone pages only: captions over the video */
     spotlight = SB.Spotlight(SB.$("#spotlight"));
 
     SB.Engine.on("result", function (tok) {
@@ -273,6 +274,7 @@ SB.TranslateView = function () {
     SB.Engine.setMode("demo");
     var stage = SB.$("#stage");
     stage.classList.remove("is-cam", "is-mirror");
+    stage.style.aspectRatio = "";
     setStageOverlay(null);
     SB.$("#stageDemo").style.display = "";
     SB.$("#mirrorToggle").classList.remove("is-on");
@@ -301,6 +303,9 @@ SB.TranslateView = function () {
     }).then(function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");
+      if (SB.Device && SB.Device.isMobile && SB.$("#cam").videoWidth) {
+        stage.style.aspectRatio = SB.$("#cam").videoWidth + " / " + SB.$("#cam").videoHeight;  /* keep skeleton aligned to the real frame */
+      }
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
       if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();

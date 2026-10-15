@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-site="mobile">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script src="../js/device.js"></script>
+  <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
+  <title>SignBridge — Live Translate</title>
+  <meta name="description" content="SignBridge — a live sign-language translator and learning companion.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../styles/main.css">
+  <link rel="stylesheet" href="../styles/views.css">
+  <link rel="stylesheet" href="../styles/polish.css">
+  <link rel="stylesheet" href="../styles/mobile.css">
+</head>
+<body data-view="translate">
+<div class="app">
+
+  <header class="topbar">
+    <a class="logo" href="index.html" aria-label="SignBridge home"><span class="logo-mark">✋</span><span class="logo-name">Sign<em>Bridge</em></span></a>
+    <div class="topbar-actions"><button class="icon-btn" id="settingsBtn" aria-label="Settings">⚙</button><div id="authSlot" class="auth-slot"><a class="chip" href="login.html">Log in</a></div></div>
+  </header>
+
+  <main class="view view--translate">
+
+    <!-- Left: signing space -->
+    <section class="card stage-card">
+      <div class="stage-head">
+        <h1>Live translate
+          <small>Sign → text, in real time. Watch the machine read your hands.</small>
+        </h1>
+        <span class="engine-pill is-demo" id="enginePill"><span class="dot"></span><span class="pill-text">Demo · simulated</span></span>
+        <div class="segmented" id="modeSeg" role="tablist" aria-label="Engine mode">
+          <div class="seg-track" id="modeSegTrack"></div>
+          <button class="is-on slug-demo" data-mode="demo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M9 3h6v11l4.5 6H4.5L9 14V3z"/><line x1="6" y1="9" x2="18" y2="9"/></svg>
+            Demo
+          </button>
+          <button class="slug-live" data-mode="live">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            Live
+          </button>
+        </div>
+        <div class="stage-toggles">
+          <button class="chip" id="mirrorToggle" title="Mirror the camera feed">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M12 3v18"/><path d="M5 7l7-4 7 4"/><path d="M5 11l7 4 7-4"/><path d="M5 17l7 4 7-4"/></svg>
+            Mirror
+          </button>
+          <button class="chip" id="landmarkToggle" title="Show hand skeleton">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="1 9 1 1 9 1"/><polyline points="23 9 23 1 15 1"/><polyline points="1 15 1 23 9 23"/><polyline points="23 15 23 23 15 23"/></svg>
+            Landmarks
+          </button>
+        </div>
+      </div>
+
+      <div class="stage" id="stage">
+        <video id="cam" autoplay playsinline muted></video>
+        <canvas id="overlay" aria-hidden="true"></canvas>
+        <div class="track-hud" id="trackHud" hidden aria-hidden="true"></div>
+        <div class="stage-captions" id="captions" aria-live="polite"></div>
+        <div class="stage-live-badge" aria-live="polite"><span class="dot"></span> Live camera</div>
+        <div class="stage-overlay-state" id="stageOverlay" hidden>
+          <div>
+            <div class="spinner" aria-hidden="true"></div>
+            <div class="overlay-title empty-title" style="color:var(--text)">Starting camera…</div>
+            <p class="overlay-detail empty-hint" style="margin:8px auto 0">Allow camera access if prompted.</p>
+          </div>
+        </div>
+        <div class="stage-demo" id="stageDemo">
+          <div class="demo-hand">✋</div>
+          <h2>Demo mode</h2>
+          <p>Recognition is simulated so you can explore the whole UI before the model is trained. Tap a quick phrase to sign, or watch a full session.</p>
+          <div class="demo-actions">
+            <button class="btn-grad" id="watchDemo">
+              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Watch a live demo
+            </button>
+            <button class="btn-blur" data-go-live="true">
+              Or try real hand tracking
+            </button>
+          </div>
+          <div class="demo-hint">Tip: switch to <strong>Live</strong> for real MediaPipe hand landmarks — the same skeleton your trained model will read.</div>
+        </div>
+      </div>
+
+      <div class="spell-strip">
+        <input class="input" id="spellInput" placeholder="Spell a word — try DOG or your name…" maxlength="24" aria-label="Spell a word">
+        <button class="btn-grad btn-sm" id="spellGo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+          Spell it
+        </button>
+      </div>
+
+      <div class="stage-status" id="stageStatus"><span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.</div>
+
+      <!-- LSTM training: record labeled landmark sequences (Live mode only) -->
+      <section class="capture-panel" id="capturePanel" hidden aria-label="Training data capture">
+        <div class="capture-head">
+          <h3>Record training data</h3>
+          <p class="capture-sub">Each take saves one labeled sequence of 63-float frames for LSTM training (<code>docs/MODELS.md</code>).</p>
+        </div>
+        <div class="capture-row">
+          <div class="field capture-field">
+            <label for="captureLabel">Class label</label>
+            <input class="input" id="captureLabel" type="text" maxlength="32" placeholder="e.g. A, HELLO, THANK_YOU" autocomplete="off">
+            <span class="hint">One sign per recording — repeat 100–200 times per class.</span>
+          </div>
+          <div class="capture-actions">
+            <button class="btn btn-soft" type="button" id="captureStart">● Record</button>
+            <button class="btn btn-ghost" type="button" id="captureStop" disabled>■ Stop &amp; save</button>
+            <button class="btn btn-ghost" type="button" id="captureCancel" disabled>Cancel take</button>
+          </div>
+        </div>
+        <div class="capture-meta">
+          <span id="captureStatus">Switch to Live mode to record.</span>
+          <span id="captureCounts">0 samples in memory</span>
+        </div>
+        <div class="capture-export">
+          <button class="btn btn-primary btn-sm" type="button" id="captureDownload">Download JSON dataset</button>
+          <button class="btn btn-ghost btn-sm" type="button" id="captureClear">Clear all samples</button>
+        </div>
+      </section>
+
+      <div class="card spotlight" id="spotlight">
+        <div class="spotlight-label">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="11" height="11"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          Last signed
+        </div>
+        <div class="spotlight-word">—</div>
+        <div class="conf-meter" aria-hidden="true"><div class="conf-fill" style="width:0%"></div></div>
+        <div class="spotlight-alts"></div>
+      </div>
+
+      <div class="quick-phrases">
+        <div class="q-label">🤟 Quick phrases — tap to sign</div>
+        <div class="q-chips" id="quickChips"></div>
+      </div>
+    </section>
+
+    <!-- Right: live transcript -->
+    <section class="card transcript-card">
+      <header>
+        <h2>Live transcript</h2>
+        <button class="icon-btn" id="tClear" data-tip="Clear" aria-label="Clear transcript">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+        </button>
+        <button class="icon-btn" id="tCopy" data-tip="Copy" aria-label="Copy transcript">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        <button class="icon-btn" id="tSpeak" data-tip="Speak" aria-label="Speak transcript">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        </button>
+      </header>
+      <div class="transcript" id="transcript" aria-live="polite">
+        <div class="empty">
+          <div class="empty-icon">🗣️</div>
+          <div class="empty-title">Live transcript</div>
+          <div class="empty-hint">No signs yet. Start the demo, tap a quick phrase, or enable Live camera — recognized signs appear here in real time.</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Settings drawer -->
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer" id="settingsDrawer" aria-label="Settings">
+  <div class="drawer-head">
+    <h3>Settings</h3>
+    <button class="icon-btn" id="drawerClose" aria-label="Close settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="15" height="15"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div class="drawer-body">
+    <div class="field">
+      <label for="setTheme">Theme</label>
+      <select class="select" id="setTheme">
+        <option value="dark">Dark (default)</option>
+        <option value="light">Light</option>
+        <option value="auto">Follow system</option>
+      </select>
+      <span class="hint">Dark is preferred by many DHH users for high contrast on captions.</span>
+    </div>
+    <div class="field">
+      <label for="setVoice">Voice output</label>
+      <select class="select" id="setVoice"></select>
+      <span class="hint">Speaks the transcript back so hearing people can reply aloud.</span>
+    </div>
+    <div class="field">
+      <label for="setRate">Speaking rate — <span id="setRateVal">1×</span></label>
+      <input type="range" id="setRate" min="0.5" max="2" step="0.1">
+    </div>
+    <div class="field">
+      <label for="setThreshold">Confidence threshold — <span id="setThresholdVal"></span></label>
+      <input type="range" id="setThreshold" min="0.3" max="0.8" step="0.05">
+      <span class="hint">Words below this are flagged amber/red with alternates.</span>
+    </div>
+    <div class="toggle-row">
+      <span class="lbl">Mirror mode<small>Flip the camera like a mirror.</small></span>
+      <button class="toggle" id="setMirror" role="switch" aria-label="Mirror mode"></button>
+    </div>
+    <div class="toggle-row">
+      <span class="lbl">Landmark overlay<small>Draw the 21-point hand skeleton over the video.</small></span>
+      <button class="toggle" id="setLandmarks" role="switch" aria-label="Landmark overlay"></button>
+    </div>
+    <div class="toggle-row">
+      <span class="lbl">Reduce motion<small>Turn off animations.</small></span>
+      <button class="toggle" id="setReduceMotion" role="switch" aria-label="Reduce motion"></button>
+    </div>
+    <hr style="border:0;border-top:1px solid var(--border);margin:16px 0">
+    <a class="btn-ghost" href="../index.html?view=desktop" style="display:block;text-align:center;margin-bottom:8px">Use desktop site</a>
+    <button class="btn-ghost" id="setReset" style="width:100%">Reset all progress &amp; settings</button>
+  </div>
+</aside>
+
+<div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+
+<nav class="m-tabbar" aria-label="Main">
+  <a href="index.html" class="active">Translate</a>
+  <a href="practice.html">Practice</a>
+  <a href="learn.html">Learn</a>
+</nav>
+
+<script src="../js/ui/common.js"></script>
+<script src="../js/views/auth.js"></script>
+<script src="../js/data/signs.js"></script>
+<script src="../js/ui/transcript.js"></script>
+<script src="../js/ui/captions.js"></script>
+<script src="../js/engine/recognizer.js"></script>
+<script src="../js/engine/simulated.js"></script>
+<script src="../js/engine/oneEuro.js"></script>
+<script src="../js/training/storage.js"></script>
+<script src="../js/training/training.js"></script>
+<script src="../js/engine/lstm-live-test.js"></script>
+<script src="../js/engine/capture.js"></script>
+<script src="../js/engine/live.js"></script>
+<script src="../js/views/translate.js"></script>
+<script src="../js/views/settings.js"></script>
+<script src="../js/app.js"></script>
+<script>
+/* nav pill init */
+(function() {
+  function movePill() {
+    var active = document.querySelector('.nav a.active');
+    var pill = document.getElementById('navPill');
+    if (!active || !pill) return;
+    var nr = document.querySelector('.nav').getBoundingClientRect();
+    var ar = active.getBoundingClientRect();
+    pill.style.left = (ar.left - nr.left) + 'px';
+    pill.style.width = ar.width + 'px';
+  }
+  setTimeout(movePill, 80);
+  window.addEventListener('resize', movePill);
+
+  /* segmented track init */
+  function moveSegTrack() {
+    var seg = document.getElementById('modeSeg');
+    var track = document.getElementById('modeSegTrack');
+    if (!seg || !track) return;
+    var active = seg.querySelector('button.is-on');
+    if (!active) return;
+    var sr = seg.getBoundingClientRect();
+    var br = active.getBoundingClientRect();
+    track.style.left = (br.left - sr.left - 3) + 'px';
+    track.style.width = br.width + 'px';
+  }
+  setTimeout(moveSegTrack, 100);
+
+  /* update seg track on mode switch */
+  document.getElementById('modeSeg') && document.getElementById('modeSeg').addEventListener('click', function() {
+    setTimeout(moveSegTrack, 10);
+  });
+})();
+</script>
+</body>
+</html>

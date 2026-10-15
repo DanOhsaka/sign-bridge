@@ -138,7 +138,7 @@ SB.LiveEngine = function () {
     return new Promise(function (resolve, reject) {
       try {
         /* Classic worker: MediaPipe WASM uses importScripts (blocked in module workers). */
-        worker = new Worker("js/engine/handWorker.js");
+        worker = new Worker(((window.SB && SB.root) || "") + "js/engine/handWorker.js");
       } catch (err) {
         reject(err);
         return;
@@ -347,14 +347,18 @@ SB.LiveEngine = function () {
 
     return loadPromise
       .then(function () {
-        return navigator.mediaDevices.getUserMedia({
-          video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30, max: 60 },
-          },
-          audio: false,
-        });
+        return navigator.mediaDevices.getUserMedia(
+          window.SB && SB.Device && SB.Device.isMobile
+            ? SB.Device.cameraConstraints()
+            : {
+                video: {
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 },
+                  frameRate: { ideal: 30, max: 60 },
+                },
+                audio: false,
+              }
+        );
       })
       .then(function (camStream) {
         stream = camStream;
