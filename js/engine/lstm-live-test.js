@@ -9,6 +9,7 @@
     let sending = false;
     let session = 0;
     let frames = [];
+    let lastSkipLog = 0;
 
     function start() {
         session++;
@@ -108,6 +109,13 @@
         );
 
         if (!frame) {
+            const now = Date.now();
+            if (now - lastSkipLog > 2000) {
+                lastSkipLog = now;
+                console.warn(
+                    "LSTM frame skipped: both shoulders must be in frame."
+                );
+            }
             return;
         }
 

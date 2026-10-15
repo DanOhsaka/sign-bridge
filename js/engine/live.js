@@ -9,9 +9,10 @@
      Inference canvas ≤640px
            │
            ▼ requestVideoFrameCallback + busy gate
-     HandLandmarker in Web Worker (GPU when available)
+     HolisticLandmarker in Web Worker (same model as dev/stan)
            │
-           ├── raw landmarks ──► classifier / recognition
+           ├── left/right hand landmarks ──► classifier / recognition
+           ├── pose landmarks ──► LSTM frame normalizer
            │
            └── UI buffer ──► One Euro + short prediction
                               └── requestAnimationFrame overlay
@@ -32,7 +33,7 @@ SB.LiveEngine = function () {
   var state = "off";
   var classifier = null;
 
-  var landmarker = null;   /* main-thread fallback only */
+  var landmarker = null;   /* main-thread fallback only (HolisticLandmarker) */
   var worker = null;
   var workerReady = false;
   var useWorker = false;
@@ -77,7 +78,9 @@ SB.LiveEngine = function () {
   var predictSec = 0.035;
   var maxPredictNorm = 0.08;
 
-  var INFER_MAX_W = 640;
+  /* dev/stan ran Holistic on the full camera frame. The LSTM was trained on
+     those landmarks, so inference is not downscaled below the 1280px camera. */
+  var INFER_MAX_W = 1280;
 
   /* Perf / HUD */
   var stats = {
@@ -107,11 +110,11 @@ SB.LiveEngine = function () {
   ];
 
   // ----------------------------------------------------------
-  // Load HandLandmarker — prefer Web Worker, fall back to main
+  // Load HolisticLandmarker — prefer Web Worker, fall back to main
   // ----------------------------------------------------------
 
   function loadLandmarker() {
-    console.log("Loading MediaPipe HandLandmarker…");
+    console.log("Loading MediaPipe HolisticLandmarker…");
     return initWorker()
       .catch(function (err) {
         console.warn(
@@ -148,7 +151,7 @@ SB.LiveEngine = function () {
         try { worker.terminate(); } catch (e) {}
         worker = null;
         reject(new Error("Worker init timeout"));
-      }, 45000);
+      }, 60000);
 
       worker.onmessage = function (ev) {
         var msg = ev.data || {};
@@ -160,7 +163,10 @@ SB.LiveEngine = function () {
           workerReady = true;
           stats.backend = "worker/" + ((msg.info && msg.info.delegate) || "GPU");
           worker.onmessage = onWorkerMessage;
-          console.log("MediaPipe HandLandmarker ready (" + stats.backend + ").");
+          if (msg.info && msg.info.fallback) {
+            console.warn("Holistic GPU delegate failed, using CPU:", msg.info.fallback);
+          }
+          console.log("MediaPipe HolisticLandmarker ready (" + stats.backend + ").");
           resolve();
           return;
         }
@@ -191,7 +197,11 @@ SB.LiveEngine = function () {
       inferFrameCount++;
       try {
         ingestResults(
-          { landmarks: msg.landmarks, handednesses: msg.handednesses },
+          {
+            leftHandLandmarks: msg.leftHandLandmarks,
+            rightHandLandmarks: msg.rightHandLandmarks,
+            poseLandmarks: msg.poseLandmarks,
+          },
           lastInferEndMs,
           msg.mediaMs
         );
@@ -215,7 +225,7 @@ SB.LiveEngine = function () {
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm"
     ).then(async function (visionModule) {
       var FilesetResolver = visionModule.FilesetResolver;
-      var HandLandmarker = visionModule.HandLandmarker;
+      var HolisticLandmarker = visionModule.HolisticLandmarker;
 
       var vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
@@ -225,27 +235,24 @@ SB.LiveEngine = function () {
         baseOptions: {
           modelAssetPath:
             "https://storage.googleapis.com/mediapipe-models/" +
-            "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            "holistic_landmarker/holistic_landmarker/float16/1/" +
+            "holistic_landmarker.task",
           delegate: "GPU",
         },
         runningMode: "VIDEO",
-        numHands: 2,
-        minHandDetectionConfidence: 0.5,
-        minHandPresenceConfidence: 0.5,
-        minTrackingConfidence: 0.5,
       };
 
       try {
-        landmarker = await HandLandmarker.createFromOptions(vision, opts);
+        landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
         stats.backend = "main/GPU";
       } catch (gpuErr) {
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
         opts.baseOptions.delegate = "CPU";
-        landmarker = await HandLandmarker.createFromOptions(vision, opts);
+        landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
         stats.backend = "main/CPU";
       }
 
-      console.log("MediaPipe HandLandmarker ready (" + stats.backend + ").");
+      console.log("MediaPipe HolisticLandmarker ready (" + stats.backend + ").");
     });
   }
 
@@ -370,7 +377,7 @@ SB.LiveEngine = function () {
         lastStatsTick = performance.now();
         startInferenceLoop();
         startRenderLoop();
-        console.log("Live engine started (HandLandmarker, latest-frame pipeline).");
+        console.log("Live engine started (HolisticLandmarker, latest-frame pipeline).");
         return self;
       })
       .catch(function (err) {
@@ -541,39 +548,15 @@ SB.LiveEngine = function () {
   }
 
   // ----------------------------------------------------------
-  // Results → stable left/right + recognition (raw only)
+  // Results → left/right + pose + recognition (raw only)
   // ----------------------------------------------------------
 
   function ingestResults(results, wallMs, mediaMs) {
-    var left = null;
-    var right = null;
-
-    var lms = results.landmarks || [];
-    var handed = results.handednesses || results.handedness || [];
-
-    for (var i = 0; i < lms.length; i++) {
-      var label = handednessLabel(handed[i]);
-      var pts = cloneLandmarks(lms[i]);
-      if (label === "Left") {
-        if (!left) left = pts;
-        else right = right || pts;
-      } else if (label === "Right") {
-        if (!right) right = pts;
-        else left = left || pts;
-      } else {
-        /* Unknown — associate by nearest previous wrist */
-        var slot = associateHand(pts);
-        if (slot === "left" && !left) left = pts;
-        else if (slot === "right" && !right) right = pts;
-        else if (!left) left = pts;
-        else if (!right) right = pts;
-      }
-    }
-
-    /* Temporal consistency: undo identity swaps when wrists cross */
-    var pair = resolveIdentity(left, right);
-    left = pair.left;
-    right = pair.right;
+    /* Holistic already labels hands anatomically, exactly as dev/stan
+       consumed them. No handedness guessing or swap repair here: the
+       LSTM training frames came straight from these two arrays. */
+    var left = firstGroup(results.leftHandLandmarks);
+    var right = firstGroup(results.rightHandLandmarks);
 
     prevRaw.left = rawHands.left;
     prevRaw.right = rawHands.right;
@@ -627,12 +610,10 @@ SB.LiveEngine = function () {
     }
   }
 
-  function handednessLabel(entry) {
-    if (!entry) return "";
-    /* Tasks API: array of Category, or nested */
-    var cat = Array.isArray(entry) ? entry[0] : entry;
-    if (!cat) return "";
-    return cat.categoryName || cat.displayName || "";
+  /* Holistic returns each hand as an array of detections; take the first. */
+  function firstGroup(list) {
+    if (!list || !list.length || !list[0] || !list[0].length) return null;
+    return cloneLandmarks(list[0]);
   }
 
   function cloneLandmarks(src) {
@@ -641,35 +622,6 @@ SB.LiveEngine = function () {
       out[i] = { x: src[i].x, y: src[i].y, z: src[i].z || 0 };
     }
     return out;
-  }
-
-  function wristDist(a, b) {
-    if (!a || !b || !a[0] || !b[0]) return Infinity;
-    var dx = a[0].x - b[0].x;
-    var dy = a[0].y - b[0].y;
-    return dx * dx + dy * dy;
-  }
-
-  function associateHand(pts) {
-    var dL = wristDist(pts, rawHands.left);
-    var dR = wristDist(pts, rawHands.right);
-    if (dL === Infinity && dR === Infinity) return "left";
-    return dL <= dR ? "left" : "right";
-  }
-
-  function resolveIdentity(left, right) {
-    if (!left || !right || !prevRaw.left || !prevRaw.right) {
-      return { left: left, right: right };
-    }
-    /* If swapped assignment is closer to previous wrists, swap back */
-    var keep =
-      wristDist(left, prevRaw.left) + wristDist(right, prevRaw.right);
-    var swap =
-      wristDist(left, prevRaw.right) + wristDist(right, prevRaw.left);
-    if (swap + 1e-6 < keep) {
-      return { left: right, right: left };
-    }
-    return { left: left, right: right };
   }
 
   function updateUiFromRaw(wallMs) {
