@@ -29,6 +29,18 @@ The design is deliberate, from 10 years of teaching sign language:
 
 ## Run it
 
+**First time on a new machine** — installs Node packages, the Python model dependencies, and creates `server/.env`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+```bash
+chmod +x setup.sh && ./setup.sh
+```
+
+The script prints the two commands that start the sign model and the app. Open http://localhost:3000. Register and login need MongoDB (`mongodb://127.0.0.1:27017/signbridge`, or an Atlas URI in `server/.env`).
+
 **Demo mode (everything except the camera):**
 ```bash
 # just double-click index.html — it works from file://
