@@ -11,6 +11,7 @@ SB.SettingsView = function () {
 
   function bind() {
     bindTheme();
+    bindSpeakLang();
     bindVoice();
     bindToggle("setMirror", "mirror");
     bindToggle("setLandmarks", "landmarks");
@@ -19,6 +20,50 @@ SB.SettingsView = function () {
     bindThreshold();
     bindReset();
     syncForm();
+  }
+
+  function bindSpeakLang() {
+    var sel = SB.$("#setSpeakLang");
+    if (!sel) return;
+    sel.innerHTML = "";
+    (SB.SPEAK_LANGS || []).forEach(function (l) {
+      var o = document.createElement("option");
+      o.value = l.code;
+      o.textContent = l.label;
+      sel.appendChild(o);
+    });
+    sel.value = SB.settings.speakLang || "en";
+    sel.addEventListener("change", function (e) {
+      SB.settings.speakLang = e.target.value || "en";
+      /* Clear a mismatched manual voice so we auto-pick for the new language */
+      var meta = SB._speakLangMeta(SB.settings.speakLang);
+      var cur = (SB.voices || []).find(function (v) { return v.name === SB.settings.voice; });
+      if (cur && (cur.lang || "").toLowerCase().indexOf(meta.code) !== 0) {
+        SB.settings.voice = null;
+      }
+      SB.saveSettings();
+      bindVoiceFill();
+    });
+  }
+
+  function bindVoiceFill() {
+    var sel = SB.$("#setVoice");
+    if (!sel) return;
+    var meta = SB._speakLangMeta(SB.settings.speakLang || "en");
+    var base = meta.code;
+    sel.innerHTML = '<option value="">Auto (' + (meta.label || base) + ")</option>";
+    var list = (SB.voices || []).slice().sort(function (a, b) {
+      var am = (a.lang || "").toLowerCase().indexOf(base) === 0 ? 0 : 1;
+      var bm = (b.lang || "").toLowerCase().indexOf(base) === 0 ? 0 : 1;
+      return am - bm || a.name.localeCompare(b.name);
+    });
+    list.forEach(function (v) {
+      var o = document.createElement("option");
+      o.value = v.name;
+      o.textContent = v.name + " (" + v.lang + ")";
+      sel.appendChild(o);
+    });
+    sel.value = SB.settings.voice || "";
   }
 
   function bindTheme() {
@@ -34,20 +79,23 @@ SB.SettingsView = function () {
 
   function bindVoice() {
     var sel = SB.$("#setVoice");
-    function fill() {
-      sel.innerHTML = '<option value="">Default voice</option>';
-      (SB.voices || []).forEach(function (v) {
-        var o = document.createElement("option");
-        o.value = v.name;
-        o.textContent = v.name + " (" + v.lang + ")";
-        sel.appendChild(o);
-      });
-      sel.value = SB.settings.voice || "";
-    }
-    if (SB.voices.length) fill();
-    else setTimeout(fill, 400); // voices load async
+    if (!sel) return;
+    if (SB.voices.length) bindVoiceFill();
+    else setTimeout(bindVoiceFill, 400); // voices load async
     sel.addEventListener("change", function (e) {
       SB.settings.voice = e.target.value || null;
+      /* If user picks a voice, align speakLang to that voice's language */
+      if (SB.settings.voice) {
+        var v = (SB.voices || []).find(function (x) { return x.name === SB.settings.voice; });
+        if (v && v.lang) {
+          var code = String(v.lang).split("-")[0].toLowerCase();
+          if (code && code !== SB.settings.speakLang) {
+            SB.settings.speakLang = code;
+            var langSel = SB.$("#setSpeakLang");
+            if (langSel) langSel.value = code;
+          }
+        }
+      }
       SB.saveSettings();
     });
   }
@@ -105,16 +153,30 @@ SB.SettingsView = function () {
   }
 
   function syncForm() {
-    SB.$("#setTheme").value = SB.settings.theme;
-    SB.$("#setMirror").classList.toggle("is-on", SB.settings.mirror);
-    SB.$("#setLandmarks").classList.toggle("is-on", SB.settings.landmarks);
-    SB.$("#setReduceMotion").classList.toggle("is-on", SB.settings.reduceMotion);
-    SB.$("#setRate").value = SB.settings.rate;
-    SB.$("#setRateVal").textContent = SB.settings.rate + "×";
-    SB.$("#setRate").style.setProperty("--fill", ((SB.settings.rate - 0.5) / 1.5 * 100) + "%");
-    SB.$("#setThreshold").value = SB.settings.threshold;
-    SB.$("#setThresholdVal").textContent = SB.confPct(SB.settings.threshold) + " → 'check this'";
-    SB.$("#setThreshold").style.setProperty("--fill", ((SB.settings.threshold - 0.3) / 0.5 * 100) + "%");
+    var theme = SB.$("#setTheme");
+    if (theme) theme.value = SB.settings.theme;
+    var speakLang = SB.$("#setSpeakLang");
+    if (speakLang) speakLang.value = SB.settings.speakLang || "en";
+    var mirror = SB.$("#setMirror");
+    if (mirror) mirror.classList.toggle("is-on", SB.settings.mirror);
+    var landmarks = SB.$("#setLandmarks");
+    if (landmarks) landmarks.classList.toggle("is-on", SB.settings.landmarks);
+    var reduce = SB.$("#setReduceMotion");
+    if (reduce) reduce.classList.toggle("is-on", SB.settings.reduceMotion);
+    var rate = SB.$("#setRate");
+    var rateVal = SB.$("#setRateVal");
+    if (rate) {
+      rate.value = SB.settings.rate;
+      rate.style.setProperty("--fill", ((SB.settings.rate - 0.5) / 1.5 * 100) + "%");
+    }
+    if (rateVal) rateVal.textContent = SB.settings.rate + "×";
+    var thr = SB.$("#setThreshold");
+    var thrVal = SB.$("#setThresholdVal");
+    if (thr) {
+      thr.value = SB.settings.threshold;
+      thr.style.setProperty("--fill", ((SB.settings.threshold - 0.3) / 0.5 * 100) + "%");
+    }
+    if (thrVal) thrVal.textContent = SB.confPct(SB.settings.threshold) + " → 'check this'";
   }
 
   return { bind: bind };

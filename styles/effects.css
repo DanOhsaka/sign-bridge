@@ -229,9 +229,66 @@
   box-shadow: none !important;
 }
 [data-theme="light"] .nav a.active { color: #fff !important; }
+
+/* Segmented with native track: never show BeUI gradient pill */
+.segmented:has(.seg-track) > .be-pill,
+#modeSeg > .be-pill {
+  display: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
 .segmented button.is-on {
   background: transparent !important;
   box-shadow: none !important;
+}
+/* Demo/Live: solid active button — hide sliding track (avoids crescent/glow) */
+#modeSeg {
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #0e1526;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+[data-theme="light"] #modeSeg {
+  background: #e8eef8;
+  border-color: rgba(20, 40, 100, 0.12);
+}
+#modeSeg .seg-track {
+  display: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#modeSeg button {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  border: 0 !important;
+  outline: none !important;
+}
+#modeSeg button:not(.is-on) {
+  background: transparent !important;
+  color: var(--text-2) !important;
+}
+#modeSeg button.is-on,
+#modeSeg button.is-on.slug-demo,
+#modeSeg button.is-on.slug-live {
+  background: #243049 !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+[data-theme="light"] #modeSeg button.is-on,
+[data-theme="light"] #modeSeg button.is-on.slug-demo,
+[data-theme="light"] #modeSeg button.is-on.slug-live {
+  background: #ffffff !important;
+  color: #0c1424 !important;
 }
 
 /* ---------- BeUI: Glass topbar ---------- */

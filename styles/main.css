@@ -487,12 +487,13 @@ button { font-family: inherit; }
 }
 .segmented button:hover { color: var(--text); }
 .segmented button.is-on {
-  background: var(--surface-3);
+  background: transparent;
   color: var(--text);
-  box-shadow: var(--shadow-1);
+  box-shadow: none;
 }
-.segmented button.is-on.slug-live { color: var(--teal); }
-.segmented button.is-on.slug-demo { color: var(--violet); }
+/* Color accents only when there is no sliding track (e.g. Practice tabs) */
+.segmented:not(:has(.seg-track)) button.is-on.slug-live { color: var(--teal); }
+.segmented:not(:has(.seg-track)) button.is-on.slug-demo { color: var(--violet); }
 
 /* ---------- Form controls ---------- */
 .input, .select {
@@ -809,8 +810,8 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 [data-theme="light"] .chip.is-on { border-color: rgba(13,148,136,.5); }
 
 .segmented button.is-on { color: var(--text); }
-.segmented button.is-on.slug-live { color: var(--teal); }
-.segmented button.is-on.slug-demo { color: var(--violet); }
+.segmented:not(:has(.seg-track)) button.is-on.slug-live { color: var(--teal); }
+.segmented:not(:has(.seg-track)) button.is-on.slug-demo { color: var(--violet); }
 
 /* Theme switcher is-dark / is-light driven by JS */
 .theme-switch.is-dark  .ts-opt.ts-dark  { color: #030712; }
@@ -894,14 +895,29 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 [data-theme="light"] .nav a.active { color: #fff !important; }
 
 /* segmented track */
-.segmented { position: relative; }
+.segmented { position: relative; overflow: hidden; }
 .seg-track {
-  position: absolute; top: 3px; bottom: 3px; border-radius: 9px;
-  background: var(--surface-3); box-shadow: 0 1px 3px rgba(0,0,0,.4);
-  transition: left var(--t-med) var(--ease), width var(--t-med) var(--ease);
+  position: absolute;
+  top: 0; left: 0;
+  border-radius: 11px;
+  background: var(--surface-3);
+  box-shadow: none;
+  transition:
+    left var(--t-med) var(--ease),
+    top var(--t-med) var(--ease),
+    width var(--t-med) var(--ease),
+    height var(--t-med) var(--ease);
   z-index: 0; pointer-events: none;
 }
-.segmented button { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 6px; }
+.segmented button {
+  position: relative; z-index: 1;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: transparent;
+}
+.segmented button.is-on {
+  background: transparent;
+  box-shadow: none;
+}
 .segmented svg { width: 13px; height: 13px; flex: none; }
 
 /* chip svg */
@@ -957,7 +973,7 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 [data-theme="light"] .theme-switch.is-dark .ts-opt.ts-dark   { color: #fff; }
 [data-theme="light"] .theme-switch.is-light .ts-opt.ts-light { color: #fff; }
 [data-theme="light"] .nav a.active { color: #fff !important; }
-[data-theme="light"] .seg-track { background:var(--surface); box-shadow:0 1px 4px rgba(0,0,0,.1); }
+[data-theme="light"] .seg-track { background: var(--surface); box-shadow: none; }
 [data-theme="light"] .spotlight-word { text-shadow:0 0 30px rgba(13,148,136,.3); }
 [data-theme="light"] .btn-border-magic::after { background:var(--surface-2); }
 

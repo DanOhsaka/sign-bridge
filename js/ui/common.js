@@ -21,10 +21,26 @@ SB.DEFAULTS = {
   landmarks: true,
   threshold: 0.6,         // conf below this → "check this" styling
   voice: null,            // speech synthesis voice name
+  speakLang: "en",        // BCP-47 primary tag for TTS output language
   rate: 1,
   reduceMotion: false,
   mode: "demo",
 };
+
+/* Languages offered in Settings → Speak language (transcript is English/ASL gloss) */
+SB.SPEAK_LANGS = [
+  { code: "en", label: "English", bcp47: "en-US" },
+  { code: "es", label: "Spanish", bcp47: "es-ES" },
+  { code: "fr", label: "French", bcp47: "fr-FR" },
+  { code: "de", label: "German", bcp47: "de-DE" },
+  { code: "it", label: "Italian", bcp47: "it-IT" },
+  { code: "pt", label: "Portuguese", bcp47: "pt-BR" },
+  { code: "zh", label: "Chinese", bcp47: "zh-CN" },
+  { code: "ja", label: "Japanese", bcp47: "ja-JP" },
+  { code: "ko", label: "Korean", bcp47: "ko-KR" },
+  { code: "hi", label: "Hindi", bcp47: "hi-IN" },
+  { code: "ar", label: "Arabic", bcp47: "ar-SA" },
+];
 
 SB.store = {
   get: function (key, fallback) {
@@ -108,6 +124,8 @@ SB.toast = function (msg, type) {
 
 /* ---------- Speech synthesis (speak the transcript back) ---------- */
 SB.voices = [];
+SB._translateCache = SB._translateCache || {};
+
 SB.loadVoices = function () {
   var fill = function () {
     SB.voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
@@ -118,17 +136,127 @@ SB.loadVoices = function () {
   }
 };
 
-SB.speak = function (text) {
-  if (!window.speechSynthesis) { SB.toast("Speech synthesis not available in this browser", "error"); return; }
-  speechSynthesis.cancel();
-  var u = new SpeechSynthesisUtterance(text);
-  u.rate = SB.settings.rate || 1;
+SB._speakLangMeta = function (code) {
+  var c = (code || "en").split("-")[0].toLowerCase();
+  return SB.SPEAK_LANGS.find(function (l) { return l.code === c; }) ||
+    { code: c, label: c, bcp47: c };
+};
+
+SB._pickVoiceForLang = function (bcp47) {
+  var voices = SB.voices || [];
+  if (!voices.length) return null;
   var want = SB.settings.voice;
   if (want) {
-    var match = SB.voices.find(function (v) { return v.name === want; });
-    if (match) u.voice = match;
+    var named = voices.find(function (v) { return v.name === want; });
+    if (named) return named;
   }
-  speechSynthesis.speak(u);
+  var primary = (bcp47 || "en").toLowerCase();
+  var base = primary.split("-")[0];
+  return (
+    voices.find(function (v) { return (v.lang || "").toLowerCase() === primary; }) ||
+    voices.find(function (v) { return (v.lang || "").toLowerCase().indexOf(base) === 0; }) ||
+    null
+  );
+};
+
+/**
+ * Translate English source text → target language.
+ * Uses free MyMemory (no API key). Falls back to project /api/translate if present.
+ * Limits: public MyMemory quotas (~daily byte cap); offline → rejects.
+ */
+SB.translateText = function (text, fromLang, toLang) {
+  var src = (fromLang || "en").split("-")[0].toLowerCase();
+  var dst = (toLang || "en").split("-")[0].toLowerCase();
+  var trimmed = String(text || "").trim();
+  if (!trimmed) return Promise.resolve("");
+  if (src === dst) return Promise.resolve(trimmed);
+
+  var cacheKey = src + "|" + dst + "|" + trimmed;
+  if (SB._translateCache[cacheKey]) {
+    return Promise.resolve(SB._translateCache[cacheKey]);
+  }
+
+  function viaMyMemory() {
+    var url =
+      "https://api.mymemory.translated.net/get?q=" +
+      encodeURIComponent(trimmed.slice(0, 450)) +
+      "&langpair=" + encodeURIComponent(src + "|" + dst);
+    return fetch(url).then(function (res) {
+      if (!res.ok) throw new Error("translate HTTP " + res.status);
+      return res.json();
+    }).then(function (data) {
+      var out = data && data.responseData && data.responseData.translatedText;
+      if (!out || /MYMEMORY WARNING/i.test(out)) {
+        throw new Error((data && data.responseDetails) || "translate failed");
+      }
+      return String(out);
+    });
+  }
+
+  function viaProjectApi() {
+    var base = (typeof SB.API_BASE === "string" ? SB.API_BASE : "");
+    return fetch(base + "/api/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: trimmed, source: src, target: dst }),
+    }).then(function (res) {
+      if (!res.ok) throw new Error("api translate " + res.status);
+      return res.json();
+    }).then(function (data) {
+      if (!data || !data.translatedText) throw new Error("empty api translate");
+      return String(data.translatedText);
+    });
+  }
+
+  return viaMyMemory()
+    .catch(function () { return viaProjectApi(); })
+    .then(function (translated) {
+      SB._translateCache[cacheKey] = translated;
+      return translated;
+    });
+};
+
+/**
+ * Speak transcript text. English path is unchanged (no network).
+ * Other speakLang values: translate EN → target, then Web Speech with matching voice/lang.
+ */
+SB.speak = function (text) {
+  if (!window.speechSynthesis) {
+    SB.toast("Speech synthesis not available in this browser", "error");
+    return;
+  }
+  var raw = String(text || "").trim();
+  if (!raw) return;
+
+  var meta = SB._speakLangMeta(SB.settings.speakLang || "en");
+  var bcp47 = meta.bcp47 || meta.code || "en-US";
+
+  function utter(spoken) {
+    speechSynthesis.cancel();
+    var u = new SpeechSynthesisUtterance(spoken);
+    u.lang = bcp47;
+    u.rate = SB.settings.rate || 1;
+    var voice = SB._pickVoiceForLang(bcp47);
+    if (voice) {
+      u.voice = voice;
+      if (voice.lang) u.lang = voice.lang;
+    }
+    speechSynthesis.speak(u);
+  }
+
+  if (meta.code === "en") {
+    utter(raw);
+    return;
+  }
+
+  SB.toast("Translating to " + (meta.label || meta.code) + "…", "info");
+  SB.translateText(raw, "en", meta.code).then(function (translated) {
+    utter(translated || raw);
+  }).catch(function () {
+    SB.toast("Translation unavailable — speaking English with selected voice", "info");
+    /* Still set lang so the engine uses a target-language voice if possible */
+    utter(raw);
+  });
 };
 
 /* ---------- Clipboard with file:// fallback ---------- */
@@ -235,7 +363,8 @@ SB.initCommon = function () {
     });
   });
 
-  /* segmented mode-switch track */
+  /* segmented mode-switch track — align exactly to the active button
+     (do NOT subtract padding; that left a crescent gap on the right) */
   SB._moveSegTrack = function () {
     var seg   = SB.$("#modeSeg");
     var track = SB.$("#modeSegTrack");
@@ -244,8 +373,10 @@ SB.initCommon = function () {
     if (!active) return;
     var sr = seg.getBoundingClientRect();
     var br = active.getBoundingClientRect();
-    track.style.left  = (br.left - sr.left - 3) + "px";
-    track.style.width = br.width + "px";
+    track.style.left   = (br.left - sr.left) + "px";
+    track.style.top    = (br.top - sr.top) + "px";
+    track.style.width  = br.width + "px";
+    track.style.height = br.height + "px";
   };
   setTimeout(SB._moveSegTrack, 120);
   var modeSeg = SB.$("#modeSeg");

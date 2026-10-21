@@ -188,7 +188,10 @@ SB._glidingPills = function () {
   }
 
   attach(SB.$(".nav"), "a.active");
+  /* Skip controls that already have a native .seg-track (Demo/Live).
+     Double pills (be-pill + seg-track) cause crescent/glow artifacts. */
   SB.$$(".segmented").forEach(function (seg) {
+    if (seg.querySelector(".seg-track")) return;
     attach(seg, "button.is-on");
   });
 };
