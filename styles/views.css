@@ -45,21 +45,30 @@
   display: grid; place-items: center;
 }
 
-.stage video, .stage canvas {
+.stage video,
+.stage canvas {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
   object-fit: cover;
+  display: none;
 }
-.stage video { display: none; }
-.stage.is-cam video, .stage.is-cam canvas { display: block; }
-.stage canvas {
-  z-index: 2;
+.stage.is-cam video,
+.stage.is-cam canvas { display: block; }
+/* Video under skeleton; canvas paints landmarks on top */
+.stage.is-cam video { z-index: 1; }
+.stage.is-cam canvas {
+  z-index: 4;
   pointer-events: none;
   /* Bitmap is drawn in CSS pixel space — don't let object-fit crop landmarks off */
   object-fit: fill;
 }
-.stage.is-mirror video {
+/* Selfie mirror: flip the camera feed; skeleton mirrors in JS */
+.stage.is-cam.is-mirror video {
   transform: scaleX(-1);
+}
+/* Never let the demo placeholder sit above the live overlay */
+.stage.is-cam .stage-demo {
+  display: none !important;
 }
 
 /* Live tracking latency / FPS HUD (dev-facing, corner of stage) */
@@ -88,12 +97,13 @@
   border-color: rgba(20, 28, 44, 0.08);
 }
 
-/* Demo placeholder */
+/* Demo placeholder — above inactive media layers */
 .stage-demo {
   text-align: center;
   padding: 32px 26px;
   max-width: 440px;
-  z-index: 1;
+  position: relative;
+  z-index: 3;
   animation: fadeIn var(--t-slow) var(--ease);
 }
 
@@ -323,12 +333,119 @@
 .transcript {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 18px;
+  padding: 18px 22px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
 }
 
+/* Continuous generating sentence (not stacked per-word cards) */
+.transcript-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 100%;
+  animation: riseIn var(--t-med) var(--ease);
+}
+.stream-meta {
+  display: flex; align-items: center; gap: 10px;
+  font-size: var(--fs-xs); color: var(--text-3);
+}
+.stream-src {
+  text-transform: uppercase; font-weight: 700; letter-spacing: .06em; font-size: 10px;
+}
+.stream-src.src-demo { color: var(--violet); }
+.stream-src.src-live { color: var(--teal); }
+.stream-hint {
+  opacity: 0.7;
+  letter-spacing: .04em;
+}
+.stream-sentence {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(22px, 2.6vw, 34px);
+  font-weight: 600;
+  line-height: 1.55;
+  letter-spacing: -0.015em;
+  color: var(--text);
+  display: block;
+}
+.stream-sentence.is-streaming::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 3px;
+  vertical-align: -0.1em;
+  background: var(--teal);
+  border-radius: 2px;
+  animation: streamBlink 1.1s steps(1) infinite;
+}
+@keyframes streamBlink {
+  0%, 45% { opacity: 1; }
+  46%, 100% { opacity: 0; }
+}
+.sentence-gap {
+  color: var(--text-3);
+  font-weight: 500;
+  padding: 0 2px;
+  user-select: none;
+}
+
+/* Individual recognised words — confidence is VISIBLE.
+   Coloured underline = how sure the machine was. */
+.stream-sentence .word,
+.bubble-words .word {
+  position: relative; display: inline; cursor: pointer;
+  padding: 0 0.06em; border-radius: 4px;
+  margin: 0;
+  white-space: pre-wrap;
+  transition: background var(--t-fast), color var(--t-fast);
+  animation: wordIn 280ms var(--ease) both;
+}
+@keyframes wordIn {
+  from { opacity: 0; filter: blur(2px); transform: translateY(4px); }
+  to   { opacity: 1; filter: none; transform: none; }
+}
+.stream-sentence .word:hover,
+.bubble-words .word:hover { background: var(--surface-3); }
+.stream-sentence .word::after,
+.bubble-words .word::after {
+  content: ""; position: absolute; left: 0.06em; right: 0.35em; bottom: 0.08em; height: 2px;
+  border-radius: 999px; background: var(--green);
+  opacity: 0.85;
+}
+.stream-sentence .word.is-mid::after,
+.bubble-words .word.is-mid::after { background: var(--amber); }
+.stream-sentence .word.is-low::after,
+.bubble-words .word.is-low::after  { background: var(--red); }
+.stream-sentence .word .conf-val,
+.bubble-words .word .conf-val {
+  position: absolute; top: -13px; right: 0;
+  font-size: 9.5px; font-weight: 700; color: var(--text-3);
+  background: var(--surface-3); padding: 0 5px; border-radius: 5px;
+  opacity: 0; transition: opacity var(--t-fast);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.stream-sentence .word:hover .conf-val,
+.bubble-words .word:hover .conf-val { opacity: 1; }
+
+.word-wrap {
+  display: inline;
+  position: relative;
+}
+.word-alts {
+  display: inline-flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  margin: 0 4px; vertical-align: middle;
+  animation: popIn var(--t-med) var(--ease);
+  font-size: var(--fs-xs);
+  font-family: var(--font-body);
+  font-weight: 500;
+}
+.word-alts .alt-lbl { color: var(--text-3); margin-right: 2px; }
+.word-alts .alt-btn { font-size: var(--fs-xs); padding: 2px 10px; }
+
+/* Legacy bubble styles kept for Learn/Practice mini-transcripts */
 .bubble {
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -350,7 +467,6 @@
 .bubble:hover { border-color: var(--border-strong); }
 .bubble.is-demo { border-left-color: var(--violet); }
 .bubble.is-live { border-left-color: var(--teal); }
-
 .bubble-head {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 8px;
@@ -369,59 +485,11 @@
   transition: background var(--t-fast), color var(--t-fast);
 }
 .bubble-actions button:hover { background: var(--surface-3); color: var(--text); }
-
 .bubble-words {
   font-family: var(--font-display);
   font-size: var(--fs-xl);
   line-height: 1.55;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px 2px;
 }
-
-.word {
-  position: relative;
-  display: inline-block;
-  cursor: pointer;
-  padding: 0 4px;
-  border-radius: 7px;
-  transition: background var(--t-fast);
-}
-.word:hover { background: var(--surface-3); }
-.word::after {
-  content: "";
-  position: absolute;
-  left: 4px; right: 4px; bottom: 1px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--green);
-  width: calc(100% - 8px);
-}
-.word.is-mid::after { background: var(--amber); }
-.word.is-low::after  { background: var(--red); }
-.word .conf-val {
-  position: absolute;
-  top: -14px; right: 2px;
-  font-size: 9.5px;
-  font-weight: 700;
-  color: var(--text-3);
-  background: var(--surface-3);
-  padding: 0 5px;
-  border-radius: 5px;
-  opacity: 0;
-  transition: opacity var(--t-fast);
-  pointer-events: none;
-  white-space: nowrap;
-}
-.word:hover .conf-val { opacity: 1; }
-
-.word-alts {
-  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
-  margin: 4px 4px 2px;
-  animation: popIn var(--t-med) var(--ease);
-}
-.word-alts .alt-btn { font-size: var(--fs-xs); padding: 2px 10px; }
-
 .bubble-foot {
   margin-top: 8px;
   font-size: 10.5px;
@@ -926,6 +994,7 @@
   .auth-welcome h1 { font-size: var(--fs-xl); }
   .letter-pad { grid-template-columns: repeat(6, 1fr); }
   .spotlight-word { font-size: var(--fs-2xl); }
+  .stream-sentence { font-size: var(--fs-xl); }
   .bubble-words { font-size: var(--fs-lg); }
   .arena-target { flex-direction: column; text-align: center; }
   .stat-row { grid-template-columns: repeat(3, 1fr); }

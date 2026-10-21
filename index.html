@@ -7,12 +7,18 @@
   <title>SignBridge — Live Translate</title>
   <meta name="description" content="SignBridge — a live sign-language translator and learning companion.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
+  <style>
+    html, body { margin: 0; min-height: 100vh; background: #060a14; color: #e9eef9; }
+    [data-theme="light"] body { background: #f4f6fb; color: #0d1626; }
+  </style>
+  <link rel="stylesheet" href="styles/main.css?v=20261021a">
+  <link rel="stylesheet" href="styles/views.css?v=20261021a">
+  <link rel="stylesheet" href="styles/polish.css?v=20261021a">
+  <link rel="stylesheet" href="styles/effects.css?v=20261021a">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles/main.css">
-  <link rel="stylesheet" href="styles/views.css">
-  <link rel="stylesheet" href="styles/polish.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet"></noscript>
 </head>
 <body data-view="translate">
 <div class="app">
@@ -163,7 +169,7 @@
         <div class="empty">
           <div class="empty-icon">🗣️</div>
           <div class="empty-title">Live transcript</div>
-          <div class="empty-hint">No signs yet. Start the demo, press <span class="kbd">1</span>–<span class="kbd">9</span>, or enable Live camera — recognized signs appear here in real time.</div>
+          <div class="empty-hint">Words stream here as one growing sentence. Start the demo, press <span class="kbd">1</span>–<span class="kbd">9</span>, or enable Live camera.</div>
         </div>
       </div>
     </section>
@@ -222,20 +228,21 @@
 
 <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
 
-<script src="js/ui/common.js"></script>
-<script src="js/views/auth.js"></script>
-<script src="js/data/signs.js"></script>
-<script src="js/ui/transcript.js"></script>
-<script src="js/engine/recognizer.js"></script>
-<script src="js/engine/simulated.js"></script>
-<script src="js/engine/oneEuro.js"></script>
-<script src="js/training/storage.js"></script>
-<script src="js/training/training.js"></script>
-<script src="./js/engine/lstm-live-test.js"></script>
-<script src="js/engine/live.js"></script>
-<script src="js/views/translate.js"></script>
-<script src="js/views/settings.js"></script>
-<script src="js/app.js"></script>
+<script src="js/ui/common.js?v=20261021a"></script>
+<script src="js/ui/effects.js?v=20261021a"></script>
+<script src="js/views/auth.js?v=20261021a"></script>
+<script src="js/data/signs.js?v=20261021a"></script>
+<script src="js/ui/transcript.js?v=20261021a"></script>
+<script src="js/engine/recognizer.js?v=20261021a"></script>
+<script src="js/engine/simulated.js?v=20261021a"></script>
+<script src="js/engine/oneEuro.js?v=20261021a"></script>
+<script src="js/training/storage.js?v=20261021a"></script>
+<script src="js/training/training.js?v=20261021a"></script>
+<script src="./js/engine/lstm-live-test.js?v=20261021a"></script>
+<script src="js/engine/live.js?v=20261021a"></script>
+<script src="js/views/translate.js?v=20261021a"></script>
+<script src="js/views/settings.js?v=20261021a"></script>
+<script src="js/app.js?v=20261021a"></script>
 <script>
 /* nav pill init */
 (function() {
