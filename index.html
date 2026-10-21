@@ -11,10 +11,10 @@
     html, body { margin: 0; min-height: 100vh; background: #060a14; color: #e9eef9; }
     [data-theme="light"] body { background: #f4f6fb; color: #0d1626; }
   </style>
-  <link rel="stylesheet" href="styles/main.css?v=20261021a">
-  <link rel="stylesheet" href="styles/views.css?v=20261021a">
-  <link rel="stylesheet" href="styles/polish.css?v=20261021a">
-  <link rel="stylesheet" href="styles/effects.css?v=20261021a">
+  <link rel="stylesheet" href="styles/main.css?v=20261021d">
+  <link rel="stylesheet" href="styles/views.css?v=20261021d">
+  <link rel="stylesheet" href="styles/polish.css?v=20261021d">
+  <link rel="stylesheet" href="styles/effects.css?v=20261021d">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -196,9 +196,14 @@
       <span class="hint">Dark is preferred by many DHH users for high contrast on captions.</span>
     </div>
     <div class="field">
-      <label for="setVoice">Voice output</label>
+      <label for="setSpeakLang">Speak language</label>
+      <select class="select" id="setSpeakLang"></select>
+      <span class="hint">Translates the English transcript into this language, then speaks it. English skips translation.</span>
+    </div>
+    <div class="field">
+      <label for="setVoice">Voice</label>
       <select class="select" id="setVoice"></select>
-      <span class="hint">Speaks the transcript back so hearing people can reply aloud.</span>
+      <span class="hint">Prefers a system voice matching the speak language. Quality depends on voices installed in the browser/OS.</span>
     </div>
     <div class="field">
       <label for="setRate">Speaking rate — <span id="setRateVal">1×</span></label>
@@ -228,21 +233,21 @@
 
 <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
 
-<script src="js/ui/common.js?v=20261021a"></script>
-<script src="js/ui/effects.js?v=20261021a"></script>
-<script src="js/views/auth.js?v=20261021a"></script>
-<script src="js/data/signs.js?v=20261021a"></script>
-<script src="js/ui/transcript.js?v=20261021a"></script>
-<script src="js/engine/recognizer.js?v=20261021a"></script>
-<script src="js/engine/simulated.js?v=20261021a"></script>
-<script src="js/engine/oneEuro.js?v=20261021a"></script>
-<script src="js/training/storage.js?v=20261021a"></script>
-<script src="js/training/training.js?v=20261021a"></script>
-<script src="./js/engine/lstm-live-test.js?v=20261021a"></script>
-<script src="js/engine/live.js?v=20261021a"></script>
-<script src="js/views/translate.js?v=20261021a"></script>
-<script src="js/views/settings.js?v=20261021a"></script>
-<script src="js/app.js?v=20261021a"></script>
+<script src="js/ui/common.js?v=20261021d"></script>
+<script src="js/ui/effects.js?v=20261021d"></script>
+<script src="js/views/auth.js?v=20261021d"></script>
+<script src="js/data/signs.js?v=20261021d"></script>
+<script src="js/ui/transcript.js?v=20261021d"></script>
+<script src="js/engine/recognizer.js?v=20261021d"></script>
+<script src="js/engine/simulated.js?v=20261021d"></script>
+<script src="js/engine/oneEuro.js?v=20261021d"></script>
+<script src="js/training/storage.js?v=20261021d"></script>
+<script src="js/training/training.js?v=20261021d"></script>
+<script src="./js/engine/lstm-live-test.js?v=20261021d"></script>
+<script src="js/engine/live.js?v=20261021d"></script>
+<script src="js/views/translate.js?v=20261021d"></script>
+<script src="js/views/settings.js?v=20261021d"></script>
+<script src="js/app.js?v=20261021d"></script>
 <script>
 /* nav pill init */
 (function() {
@@ -258,8 +263,12 @@
   setTimeout(movePill, 80);
   window.addEventListener('resize', movePill);
 
-  /* segmented track init */
+  /* segmented track — use SB._moveSegTrack (exact button bounds) */
   function moveSegTrack() {
+    if (window.SB && typeof SB._moveSegTrack === 'function') {
+      SB._moveSegTrack();
+      return;
+    }
     var seg = document.getElementById('modeSeg');
     var track = document.getElementById('modeSegTrack');
     if (!seg || !track) return;
@@ -267,12 +276,12 @@
     if (!active) return;
     var sr = seg.getBoundingClientRect();
     var br = active.getBoundingClientRect();
-    track.style.left = (br.left - sr.left - 3) + 'px';
+    track.style.left = (br.left - sr.left) + 'px';
+    track.style.top = (br.top - sr.top) + 'px';
     track.style.width = br.width + 'px';
+    track.style.height = br.height + 'px';
   }
   setTimeout(moveSegTrack, 100);
-
-  /* update seg track on mode switch */
   document.getElementById('modeSeg') && document.getElementById('modeSeg').addEventListener('click', function() {
     setTimeout(moveSegTrack, 10);
   });
