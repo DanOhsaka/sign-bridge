@@ -159,16 +159,22 @@ SB.confPct = function (conf) { return Math.round(conf * 100) + "%"; };
 
 /* ---------- Settings drawer ---------- */
 SB.openDrawer = function (id) {
-  SB.$("#" + id).classList.add("is-open");
-  SB.$("#drawerBackdrop").classList.add("is-open");
+  var drawer = SB.$("#" + id);
+  var backdrop = SB.$("#drawerBackdrop");
+  if (drawer) drawer.classList.add("is-open");
+  if (backdrop) backdrop.classList.add("is-open");
 };
 SB.closeDrawer = function () {
-  SB.$$(".drawer.is-open").forEach(function (d) { d.classList.remove("is-open"); });
-  SB.$("#drawerBackdrop").classList.remove("is-open");
+  SB.$$(".drawer").forEach(function (d) { d.classList.remove("is-open"); });
+  var backdrop = SB.$("#drawerBackdrop");
+  if (backdrop) backdrop.classList.remove("is-open");
 };
 
 SB.initCommon = function () {
   SB.loadVoices();
+
+  /* ensure settings starts closed (guards against stale classes) */
+  SB.closeDrawer();
 
   /* global topbar wiring — sliding theme switch */
   var themeSwitch = SB.$("#themeSwitch");
@@ -265,4 +271,7 @@ SB.initCommon = function () {
   });
 
   if (SB.paintAuthSlot) SB.paintAuthSlot();
+
+  /* BeUI + Aceternity decorative layer (no-ops if effects.js not loaded) */
+  if (SB.initEffects) SB.initEffects();
 };

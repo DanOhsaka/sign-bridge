@@ -25,7 +25,7 @@ SB.TranslateView = function () {
       if (SB.Engine.getMode() === "live") {
         transcript.addToken(tok);
         spotlight.show(tok);
-        transcript.endUtterance();
+        /* keep one continuous sentence — do not open a new card per word */
       }
     });
 
@@ -64,7 +64,7 @@ SB.TranslateView = function () {
 
         transcript.addToken(token);
         spotlight.show(token);
-        transcript.endUtterance();
+        /* keep one continuous sentence — do not open a new card per word */
 
         console.log(
           "SignBridge transcript updated:",
@@ -297,7 +297,7 @@ SB.TranslateView = function () {
       videoEl: SB.$("#cam"),
       canvasEl: SB.$("#overlay"),
       mirror: SB.settings.mirror,
-      drawLandmarks: SB.settings.landmarks,
+      drawLandmarks: SB.settings.landmarks !== false,
     }).then(function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");
@@ -306,10 +306,11 @@ SB.TranslateView = function () {
         window.SignBridgeLiveTest.start();
       }
 
-      SB.$("#mirrorToggle").classList.toggle("is-on", SB.settings.mirror);
-      SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks);
-      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
-      if (live().setMirror) live().setMirror(SB.settings.mirror);
+      SB.$("#mirrorToggle").classList.toggle("is-on", !!SB.settings.mirror);
+      SB.$("#landmarkToggle").classList.toggle("is-on", SB.settings.landmarks !== false);
+      /* Push chip state into the running engine (settings alone don't redraw) */
+      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks !== false);
+      if (live().setMirror) live().setMirror(!!SB.settings.mirror);
       setPill("live");
       refreshCapturePanelVisibility();
       if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';

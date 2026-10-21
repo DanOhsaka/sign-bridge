@@ -1,19 +1,15 @@
 /* ============================================================
    SignBridge — Transcript renderer (transcript.js)
    ------------------------------------------------------------
-   The transcript is the heart of the learning loop: it shows
-   WHAT the machine understood, and HOW sure it was.
+   Streaming sentence UX: words append into ONE continuous
+   paragraph (like a generating sentence), not a vertical queue
+   of per-word timestamped cards.
 
-   Teaching design baked in here:
-     • confidence is visible on every word (coloured underline) —
-       learners watch the recognizer "hesitate" on hard signs
-     • low-confidence words unfold their alternates inline, and
-       clicking one replaces the word — learners experience that
-       recognition is probabilistic and confirmation matters
-     • every utterance keeps its source badge (Demo/Live) so the
-       prototype's honesty is built in
-     • the panel is aria-live so screen readers announce signing
-       sessions (accessibility for the hearing side too)
+   Teaching design kept:
+     • confidence is visible on every word (coloured underline)
+     • low-confidence words unfold alternates inline
+     • source badge (Demo/Live) shown once for the stream
+     • aria-live so screen readers announce signing
    ============================================================ */
 
 window.SB = window.SB || {};
@@ -24,60 +20,70 @@ SB.Transcript = function (container, opts) {
   var el = container;
   var self = this;
 
-  /* current open utterance being streamed into */
-  var openBubble = null;
+  /* single streaming sentence surface */
+  var stream = null;
+  var sentence = null;
+  var sourceEl = null;
+  var pendingBreak = false;
 
-  function bubbleFor(tok) {
-    if (!openBubble) {
-      openBubble = document.createElement("div");
-      openBubble.className = "bubble is-" + (tok.source || "demo");
+  function ensureStream(tok) {
+    if (!stream) {
+      el.innerHTML = "";
+      stream = document.createElement("div");
+      stream.className = "transcript-stream";
 
-      var now = new Date();
-      var head = document.createElement("div");
-      head.className = "bubble-head";
-      head.innerHTML =
-        '<span class="bubble-time">' +
-        String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0") +
-        "</span>" +
-        '<span class="bubble-src src-' + (tok.source || "demo") + '">' + (tok.source === "live" ? "● Live" : "● Demo") + "</span>";
+      var meta = document.createElement("div");
+      meta.className = "stream-meta";
+      sourceEl = document.createElement("span");
+      sourceEl.className = "stream-src src-" + (tok.source || "demo");
+      sourceEl.textContent = tok.source === "live" ? "● Live" : "● Demo";
+      meta.appendChild(sourceEl);
 
-      var actions = document.createElement("div");
-      actions.className = "bubble-actions";
-      var speakBtn = document.createElement("button");
-      speakBtn.title = "Speak this out loud";
-      speakBtn.textContent = "🔊";
-      speakBtn.addEventListener("click", function () { SB.speak(self.bubbleText(openBubble)); });
-      var copyBtn = document.createElement("button");
-      copyBtn.title = "Copy this utterance";
-      copyBtn.textContent = "⧉";
-      copyBtn.addEventListener("click", function () { SB.copyText(self.bubbleText(openBubble)); });
-      actions.appendChild(speakBtn);
-      actions.appendChild(copyBtn);
-      head.appendChild(actions);
+      var hint = document.createElement("span");
+      hint.className = "stream-hint";
+      hint.textContent = "streaming";
+      meta.appendChild(hint);
 
-      var words = document.createElement("div");
-      words.className = "bubble-words";
-      head.after(words);
+      sentence = document.createElement("p");
+      sentence.className = "stream-sentence is-streaming";
+      sentence.setAttribute("aria-live", "polite");
 
-      openBubble.appendChild(head);
-      openBubble.appendChild(words);
-      el.appendChild(openBubble);
-      openBubble.scrollIntoView({ block: "end", behavior: "smooth" });
+      stream.appendChild(meta);
+      stream.appendChild(sentence);
+      el.appendChild(stream);
+    } else if (sourceEl && tok.source) {
+      sourceEl.className = "stream-src src-" + tok.source;
+      sourceEl.textContent = tok.source === "live" ? "● Live" : "● Demo";
     }
-    return openBubble;
+    return sentence;
   }
 
-  /* one recognised token → one animated word */
+  function appendBreakIfNeeded() {
+    if (!pendingBreak || !sentence || !sentence.childNodes.length) {
+      pendingBreak = false;
+      return;
+    }
+    /* soft sentence break — keep one continuous stream, no new card */
+    var gap = document.createElement("span");
+    gap.className = "sentence-gap";
+    gap.setAttribute("aria-hidden", "true");
+    gap.textContent = " · ";
+    sentence.appendChild(gap);
+    pendingBreak = false;
+  }
+
+  /* one recognised token → one word appended to the growing sentence */
   self.addToken = function (tok) {
-    var empty = SB.$(".empty", el);
-    if (empty) empty.remove();
-    var b = bubbleFor(tok);
-    var wordsBox = b.querySelector(".bubble-words");
+    ensureStream(tok);
+    appendBreakIfNeeded();
+
     var span = document.createElement("span");
     span.className = "word " + SB.confClass(tok.conf);
     span.dataset.conf = tok.conf;
     span.dataset.text = tok.text;
-    span.innerHTML = SB.escHtml(tok.glyph ? tok.glyph + " " : "") + SB.escHtml(tok.text);
+    var label = (tok.glyph ? tok.glyph + " " : "") + tok.text;
+    /* trailing space so words read as a natural sentence */
+    span.appendChild(document.createTextNode(label + " "));
     span.title = "Confidence " + SB.confPct(tok.conf);
     span.setAttribute("tabindex", "0");
 
@@ -86,9 +92,13 @@ SB.Transcript = function (container, opts) {
     val.textContent = SB.confPct(tok.conf);
     span.appendChild(val);
 
-    /* low confidence → unfold alternates */
+    /* low confidence → unfold alternates under the word (inline) */
     if (tok.alt && tok.alt.length && tok.conf < 0.8) {
-      var altRow = document.createElement("div");
+      var wrap = document.createElement("span");
+      wrap.className = "word-wrap";
+      wrap.appendChild(span);
+
+      var altRow = document.createElement("span");
       altRow.className = "word-alts";
       var lbl = document.createElement("span");
       lbl.className = "alt-lbl";
@@ -100,43 +110,53 @@ SB.Transcript = function (container, opts) {
         btn.textContent = a;
         btn.addEventListener("click", function () {
           span.dataset.text = a;
-          span.textContent = a;
+          while (span.firstChild) span.removeChild(span.firstChild);
+          span.appendChild(document.createTextNode(a + " "));
+          span.appendChild(val);
           span.className = "word " + SB.confClass(0.95);
           span.title = "Confirmed manually";
           altRow.remove();
-          b.classList.add("anim-pop");
         });
         altRow.appendChild(btn);
       });
-      wordsBox.appendChild(span);
-      wordsBox.appendChild(altRow);
+      wrap.appendChild(altRow);
+      sentence.appendChild(wrap);
     } else {
-      wordsBox.appendChild(span);
+      sentence.appendChild(span);
     }
 
-    b.scrollIntoView({ block: "end", behavior: "smooth" });
+    /* keep the newest word in view */
+    el.scrollTop = el.scrollHeight;
     if (opts.onToken) opts.onToken(tok);
   };
 
-  /* end the current utterance */
-  self.endUtterance = function () { openBubble = null; };
+  /* mark a soft pause between phrases — does NOT open a new card */
+  self.endUtterance = function () {
+    if (sentence && sentence.querySelector(".word")) pendingBreak = true;
+  };
 
-  self.bubbleText = function (bubble) {
-    return SB.$$(".word", bubble).map(function (w) { return w.dataset.text || w.textContent; }).join(" ");
+  self.bubbleText = function () {
+    return self.allText();
   };
 
   self.clear = function () {
     el.innerHTML =
       '<div class="empty">' +
       '<div class="empty-icon">🗣️</div>' +
-      '<div class="empty-title">Live transcript</div>' +
-      '<div class="empty-hint">No signs yet. Start the demo or enable Live camera — recognized signs appear here in real time.</div>' +
+      'Press <span class="kbd">1</span>–<span class="kbd">9</span>, click a phrase, or hit ' +
+      "<em>Watch a live demo</em> — everything streams here as a sentence, word by word." +
       "</div>";
-    openBubble = null;
+    stream = null;
+    sentence = null;
+    sourceEl = null;
+    pendingBreak = false;
   };
 
   self.allText = function () {
-    return SB.$$(".bubble", el).map(function (b) { return self.bubbleText(b); }).join("\n");
+    if (!sentence) return "";
+    return SB.$$(".word", sentence)
+      .map(function (w) { return w.dataset.text || w.textContent; })
+      .join(" ");
   };
 
   self.speakAll = function () { SB.speak(self.allText()); };
