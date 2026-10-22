@@ -275,6 +275,7 @@ SB.TranslateView = function () {
     stage.classList.remove("is-cam", "is-mirror");
     setStageOverlay(null);
     SB.$("#stageDemo").style.display = "";
+    var _hint = SB.$("#demoHintBar"); if (_hint) _hint.hidden = false;
     SB.$("#mirrorToggle").classList.remove("is-on");
     var st = SB.$("#stageStatus");
     if (st) {
@@ -289,6 +290,7 @@ SB.TranslateView = function () {
   function goLive() {
     var stage = SB.$("#stage");
     SB.$("#stageDemo").style.display = "none";
+    var _hint = SB.$("#demoHintBar"); if (_hint) _hint.hidden = true;
     setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';

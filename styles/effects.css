@@ -6,41 +6,50 @@
    Sources: beui.dev · ui.aceternity.com
    ============================================================ */
 
-/* ---------- Aceternity: Spotlight (hero glow) ---------- */
+/* ---------- Aceternity: Spotlight (full-viewport mouse follow) ---------- */
 .ac-spotlight {
+  --sx: 50%;
+  --sy: 38%;
   pointer-events: none;
   position: fixed;
   inset: 0;
+  width: 100vw;
+  height: 100vh;
+  width: 100dvw;
+  height: 100dvh;
   z-index: 0;
   overflow: hidden;
 }
 .ac-spotlight::before {
   content: "";
   position: absolute;
-  width: 140vmax;
-  height: 140vmax;
-  left: 50%;
-  top: -20%;
-  transform: translate(-50%, -40%) scale(1);
+  width: min(160vmax, 2200px);
+  height: min(160vmax, 2200px);
+  left: var(--sx);
+  top: var(--sy);
+  transform: translate(-50%, -50%);
   background: radial-gradient(
     ellipse at center,
-    rgba(52, 224, 192, 0.18) 0%,
-    rgba(139, 140, 255, 0.10) 32%,
+    rgba(52, 224, 192, 0.20) 0%,
+    rgba(139, 140, 255, 0.11) 28%,
     transparent 58%
   );
-  animation: acSpotlightIn 1.6s cubic-bezier(.22, .8, .32, 1) .2s both;
+  opacity: 0;
+  animation: acSpotlightIn 1.2s cubic-bezier(.22, .8, .32, 1) .15s both;
+  will-change: left, top;
+  transition: left 90ms linear, top 90ms linear;
 }
 [data-theme="light"] .ac-spotlight::before {
   background: radial-gradient(
     ellipse at center,
-    rgba(14, 159, 134, 0.14) 0%,
-    rgba(91, 91, 214, 0.08) 32%,
+    rgba(14, 159, 134, 0.16) 0%,
+    rgba(91, 91, 214, 0.09) 28%,
     transparent 58%
   );
 }
 @keyframes acSpotlightIn {
-  from { opacity: 0; transform: translate(-72%, -62%) scale(0.5); }
-  to   { opacity: 1; transform: translate(-50%, -40%) scale(1); }
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.72); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 /* ---------- Aceternity: Background Beams (SVG paths) ---------- */
@@ -291,15 +300,11 @@
   color: #0c1424 !important;
 }
 
-/* ---------- BeUI: Glass topbar ---------- */
+/* ---------- BeUI: Glass topbar (full-bleed; no side inset hack) ---------- */
 .topbar {
   position: sticky;
   top: 0;
   z-index: 40;
-  margin-left: -8px;
-  margin-right: -8px;
-  padding-left: 8px;
-  padding-right: 8px;
   background: color-mix(in srgb, var(--bg) 72%, transparent);
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
@@ -307,11 +312,12 @@
 }
 
 .logo-mark {
-  transition: transform 320ms cubic-bezier(.34, 1.4, .64, 1), box-shadow var(--t-med);
+  transition: color 180ms var(--ease), transform 240ms cubic-bezier(.34, 1.4, .64, 1);
 }
 .logo:hover .logo-mark {
-  transform: rotate(-8deg) scale(1.06);
-  box-shadow: var(--glow-teal);
+  transform: scale(1.06);
+  color: var(--teal);
+  box-shadow: none;
 }
 
 /* ---------- BeUI: Spring toggle + drawer ---------- */
@@ -353,20 +359,10 @@
   to   { opacity: 1; transform: none; }
 }
 
-/* ---------- Aceternity: Stage ambient grid ---------- */
+/* ---------- Stage ambient (no hard vertical grid seam) ---------- */
 .stage::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(151, 168, 205, 0.06) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(151, 168, 205, 0.06) 1px, transparent 1px);
-  background-size: 36px 36px;
-  mask-image: radial-gradient(ellipse at 50% 40%, black 20%, transparent 75%);
-  -webkit-mask-image: radial-gradient(ellipse at 50% 40%, black 20%, transparent 75%);
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.7;
+  content: none !important;
+  display: none !important;
 }
 .stage video { z-index: 1; }
 .stage canvas { pointer-events: none; }
@@ -413,4 +409,246 @@
   }
   .ac-wobble { transform: none !important; }
   .nav .be-pill, .segmented .be-pill { transition: none !important; }
+  .sb-three-bg { display: none !important; }
+}
+
+/* ============================================================
+   Three.js atmosphere (pointer-events none — never steal clicks)
+   ============================================================ */
+.sb-three-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  width: 100dvw;
+  height: 100dvh;
+  z-index: 0;
+  pointer-events: none !important;
+  overflow: hidden;
+}
+.sb-three-bg canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+}
+/* When Three background is live, fade CSS beam SVG; spotlight still follows pointer */
+html.sb-has-three .ac-beams {
+  display: none !important;
+}
+html.sb-has-three .ac-spotlight::before {
+  opacity: 0.55;
+}
+/* Kill asymmetric CSS mesh wash when Three owns the atmosphere */
+html.sb-has-three body::before {
+  display: none !important;
+  content: none !important;
+}
+
+.sb-three-orb,
+.sb-three-hand {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none !important;
+  overflow: visible;
+}
+.sb-three-orb canvas,
+.sb-three-hand canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none !important;
+}
+
+
+#stage {
+  isolation: isolate;
+}
+/* Dark: opaque panels kill mid-screen Three bleed */
+html[data-theme="dark"] #stage,
+html[data-theme="dark"].sb-has-three #stage {
+  background: #0d1425 !important;
+}
+html[data-theme="dark"] .stage-card,
+html[data-theme="dark"] .stage-card.ac-glass,
+html[data-theme="dark"] .transcript-card,
+html[data-theme="dark"] .transcript-card.ac-glass,
+html[data-theme="dark"] .arena,
+html[data-theme="dark"] .arena.ac-glass,
+html[data-theme="dark"] .stats-card > .card,
+html[data-theme="dark"] .stats-card > .card.ac-glass,
+html[data-theme="dark"] .etiquette,
+html[data-theme="dark"] .etiquette.ac-glass,
+html[data-theme="dark"] .auth-welcome,
+html[data-theme="dark"] .auth-welcome.ac-glass,
+html[data-theme="dark"] .auth-form-card,
+html[data-theme="dark"] .auth-form-card.ac-glass,
+html[data-theme="dark"].sb-has-three .stage-card,
+html[data-theme="dark"].sb-has-three .stage-card.ac-glass,
+html[data-theme="dark"].sb-has-three .transcript-card,
+html[data-theme="dark"].sb-has-three .transcript-card.ac-glass,
+html[data-theme="dark"].sb-has-three .arena,
+html[data-theme="dark"].sb-has-three .arena.ac-glass,
+html[data-theme="dark"].sb-has-three .stats-card > .card,
+html[data-theme="dark"].sb-has-three .etiquette,
+html[data-theme="dark"].sb-has-three .auth-welcome,
+html[data-theme="dark"].sb-has-three .auth-form-card {
+  background: #0d1425 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  --gx: 50%;
+  --gy: 50%;
+}
+.stage-card.ac-glare::after,
+.transcript-card.ac-glare::after,
+.arena.ac-glare::after,
+.stats-card > .card.ac-glare::after,
+.etiquette.ac-glare::after,
+.auth-welcome.ac-glare::after,
+.auth-form-card.ac-glare::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+}
+html[data-theme="dark"] .stage-card .stage-head,
+html[data-theme="dark"] .stage-card .spell-strip,
+html[data-theme="dark"] .stage-card .stage-status,
+html[data-theme="dark"] .stage-card .demo-hint-bar,
+html[data-theme="dark"] .stage-card #stage,
+html[data-theme="dark"] .stage-card .stage,
+html[data-theme="dark"] .transcript-card > header {
+  background-color: #0d1425 !important;
+  background-image: none !important;
+}
+/* Light: soft frosted glass — Three shows through; text stays dark/readable */
+html[data-theme="light"] .stage-card,
+html[data-theme="light"] .stage-card.ac-glass,
+html[data-theme="light"] .transcript-card,
+html[data-theme="light"] .transcript-card.ac-glass,
+html[data-theme="light"] .arena,
+html[data-theme="light"] .arena.ac-glass,
+html[data-theme="light"] .stats-card > .card,
+html[data-theme="light"] .etiquette,
+html[data-theme="light"] .auth-welcome,
+html[data-theme="light"] .auth-form-card,
+html[data-theme="light"].sb-has-three .stage-card,
+html[data-theme="light"].sb-has-three .transcript-card,
+html[data-theme="light"].sb-has-three .arena,
+html[data-theme="light"].sb-has-three .stats-card > .card,
+html[data-theme="light"].sb-has-three .etiquette,
+html[data-theme="light"].sb-has-three .auth-welcome,
+html[data-theme="light"].sb-has-three .auth-form-card {
+  background: rgba(255, 255, 255, 0.58) !important;
+  backdrop-filter: blur(14px) saturate(1.12) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.12) !important;
+  border-color: rgba(20, 40, 100, 0.14) !important;
+}
+html[data-theme="light"] .stage-card .stage-head,
+html[data-theme="light"] .stage-card .spell-strip,
+html[data-theme="light"] .stage-card .stage-status,
+html[data-theme="light"] .stage-card .demo-hint-bar,
+html[data-theme="light"] .stage-card #stage,
+html[data-theme="light"] .stage-card .stage,
+html[data-theme="light"] .transcript-card > header,
+html[data-theme="light"] #stage {
+  background: rgba(255, 255, 255, 0.42) !important;
+  background-image: none !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+}
+html[data-theme="light"] .topbar {
+  background: color-mix(in srgb, #e8edf6 70%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.15) !important;
+}
+/* Transcript words must stay readable in light (no white-on-white / dark-on-dark) */
+html[data-theme="light"] .stream-sentence,
+html[data-theme="light"] .stream-sentence .word,
+html[data-theme="light"] .spotlight-word,
+html[data-theme="light"] .empty-title,
+html[data-theme="light"] .empty-hint {
+  color: #0c1424 !important;
+  -webkit-text-fill-color: #0c1424;
+}
+html[data-theme="light"] .stream-sentence .word .conf-val {
+  color: #5c6b86 !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+}
+.stage-demo { position: relative; z-index: 3; }
+/* Keep camera layers above decorative Three; do not change positioning */
+#stage video { z-index: 1; }
+#stage.is-cam canvas#overlay { z-index: 4; }
+
+/* No Three orbs on logo / empty / demo-hand — flat marks only */
+.logo-mark .sb-three-orb,
+.empty-icon .sb-three-orb,
+.demo-hand .sb-three-hand,
+.demo-hand .sb-three-orb {
+  display: none !important;
+}
+
+html.sb-three-paused .sb-three-bg,
+html.reduce-motion .sb-three-bg {
+  display: none !important;
+}
+
+/* Ensure app shell stays above the WebGL backdrop */
+.app {
+  position: relative;
+  z-index: 1;
+}
+/* Fill column gaps so Three particles don't flash a vertical strip between cards */
+.view--translate,
+.view--practice,
+.view--learn,
+.view--auth {
+  position: relative;
+  isolation: isolate;
+  /* padding set in views/polish — keeps title/cards off rounded underlay corners */
+  overflow: visible;
+}
+.view--translate::before,
+.view--practice::before,
+.view--learn::before,
+.view--auth::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: calc(var(--r-lg) + 4px);
+  background: #0a1220;
+  pointer-events: none;
+}
+[data-theme="light"] .view--translate::before,
+[data-theme="light"] .view--practice::before,
+[data-theme="light"] .view--learn::before,
+[data-theme="light"] .view--auth::before {
+  background: rgba(232, 238, 248, 0.45);
+}
+
+
+/* full-bleed topbar overflow guard */
+html, body { overflow-x: clip; }
+@supports not (overflow: clip) {
+  html, body { overflow-x: hidden; }
+}
+
+
+/* box-fit: content cards stay visible */
+.card:not(.stage-card) {
+  overflow: visible;
+}
+.stage-card {
+  overflow: visible;
+}
+.stage.is-cam,
+#modeSeg {
+  overflow: hidden;
+}
+.stage-card > .stage-head,
+.stage-card > .spell-strip,
+.stage-card > .stage-status {
+  position: relative;
+  z-index: 1;
 }

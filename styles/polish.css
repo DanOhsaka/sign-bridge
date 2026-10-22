@@ -98,7 +98,7 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   border-color: var(--border);
 }
 [data-theme="light"] .card {
-  background: var(--surface-solid);
+  background: var(--surface);
   box-shadow: var(--shadow-1);
   border-color: var(--border-strong);
 }
@@ -109,7 +109,9 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   top: 0;
   z-index: 50;
   margin-bottom: var(--space-5);
-  padding: 14px 0;
+  /* horizontal padding owned by main.css full-bleed rules */
+  padding-top: 14px;
+  padding-bottom: 14px;
   background: color-mix(in srgb, var(--bg) 78%, transparent);
   backdrop-filter: blur(14px) saturate(1.15);
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
@@ -234,10 +236,11 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
 
 /* Camera / stage states */
 .stage {
-  aspect-ratio: 16 / 9;
   border-radius: 0;
   position: relative;
 }
+.stage.is-cam { aspect-ratio: 16 / 9; }
+.stage:not(.is-cam) { aspect-ratio: auto; }
 .stage-overlay-state {
   position: absolute;
   inset: 0;
@@ -371,11 +374,12 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
 /* Practice hierarchy */
 .practice-head {
   margin-bottom: var(--space-4);
+  padding: 0 2px; /* keep title/toggle clear of rounded shell */
 }
 .practice-head h1 { font-size: var(--fs-2xl); }
 .practice-grid {
-  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 0.9fr);
-  gap: 18px;
+  grid-template-columns: minmax(0, 1.35fr) minmax(300px, 1fr);
+  gap: 20px;
 }
 .arena-target {
   padding: 22px;
@@ -423,16 +427,17 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   gap: 8px;
 }
 
-/* Letter pad: larger touch targets */
+/* Letter pad: touch targets that still fit the arena column */
 .letter-pad {
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 8px;
+  min-width: 0;
 }
 .letter-pad button {
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 0;
+  min-height: 40px;
   border-radius: 10px;
-  font-size: 16px;
+  font-size: 15px;
   position: relative;
 }
 .letter-pad button.is-correct {
@@ -497,17 +502,25 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   background: var(--surface);
 }
 
-/* Demo-mode hand mark — static (no bounce / spin / shimmer) */
+/* Demo-mode hand mark — flat Lucide icon, no circle/spin */
 .demo-hand,
 .stage-demo .demo-hand,
 .auth-welcome .demo-hand {
   animation: none !important;
   transform: none !important;
+  background: none !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
 }
 .demo-hand::before,
 .demo-hand::after,
+.stage-demo .demo-hand::before,
 .stage-demo .demo-hand::after,
+.logo-mark::before,
 .logo-mark::after {
+  content: none !important;
+  display: none !important;
   animation: none !important;
   opacity: 0 !important;
 }
@@ -538,9 +551,168 @@ html.reduce-motion *::after {
   .learn-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 }
 @media (max-width: 640px) {
-  .letter-pad { grid-template-columns: repeat(7, 1fr); }
+  .letter-pad { grid-template-columns: repeat(7, minmax(0, 1fr)); }
   .demo-actions .btn-grad,
   .demo-actions .btn-blur { min-width: 0; width: 100%; }
   .learn-grid { grid-template-columns: 1fr; }
   .arena-target .letter-card { width: 104px; height: 104px; font-size: 56px; }
+}
+
+
+/* ===== Box-fit safety ===== */
+.card-pad {
+  padding: 24px 26px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+.stats-card .card.card-pad { overflow: visible; }
+.stats-card .section-title { margin-bottom: 4px; line-height: 1.3; }
+.stats-card .section-sub {
+  margin: 8px 0 14px;
+  line-height: 1.55;
+  overflow-wrap: break-word;
+}
+.stat-row { gap: 12px; align-items: stretch; }
+.stat {
+  padding: 18px 14px 16px !important;
+  overflow: visible !important;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+}
+.stat .stat-num {
+  line-height: 1.25 !important;
+  padding: 4px 0 2px !important;
+  overflow: visible !important;
+}
+.stat .stat-lbl {
+  margin-top: 0 !important;
+  padding: 0 4px 4px !important;
+  line-height: 1.4 !important;
+  letter-spacing: 0.05em !important;
+}
+.ring-wrap { padding: 8px 4px; gap: 18px; min-height: 108px; }
+.ring-legend span { display: block; line-height: 1.4; padding-bottom: 2px; }
+.review-item {
+  padding: 16px 18px !important;
+  overflow: visible !important;
+}
+.practice-head .segmented,
+.segmented:not(:has(.seg-track)) {
+  overflow: visible !important;
+  padding: 5px;
+  flex: none;
+}
+.practice-head .segmented button,
+.segmented:not(:has(.seg-track)) button {
+  padding: 11px 20px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.chip, .btn, .icon-btn {
+  box-sizing: border-box;
+  line-height: 1.3;
+}
+.chip { padding: 8px 14px; }
+.empty {
+  padding: 20px 18px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+.sign-card, .phrase-card {
+  padding: 18px 16px;
+  box-sizing: border-box;
+}
+.sign-card .sc-desc, .phrase-card p, .review-item strong {
+  overflow-wrap: break-word;
+}
+.auth-welcome, .auth-form-card {
+  overflow: visible;
+  box-sizing: border-box;
+}
+.arena, .practice-grid, .stats-card, .letter-pad {
+  min-width: 0;
+}
+.letter-pad {
+  width: 100%;
+  max-width: 100%;
+  overflow: visible;
+}
+@media (max-width: 720px) {
+  .card-pad { padding: 18px 16px; }
+  .stat { padding: 14px 8px 12px !important; }
+  .stat .stat-num { font-size: var(--fs-lg); }
+}
+
+
+/* translate seam + tip */
+.stage-card {
+  background: #0d1425 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: var(--shadow-2);
+}
+.stage:not(.is-cam) .stage-demo {
+  overflow: visible;
+}
+.stage:not(.is-cam) .demo-hint {
+  position: relative;
+  z-index: 4;
+}
+
+
+/* practice opaque panels — block Three bleed through glass */
+html[data-theme="dark"] .view--practice .arena,
+html[data-theme="dark"] .view--practice .stats-card > .card {
+  background: #0d1425 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+[data-theme="light"] .view--practice .arena,
+[data-theme="light"] .view--practice .stats-card > .card {
+  background: rgba(255, 255, 255, 0.58) !important;
+  backdrop-filter: blur(14px) saturate(1.12) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.12) !important;
+}
+
+
+/* practice shell inset — content clear of rounded underlay corners */
+.view--practice {
+  padding: 28px 30px 34px !important;
+  box-sizing: border-box;
+}
+.view--practice .practice-grid {
+  gap: 22px;
+}
+.view--practice .arena {
+  padding: 28px 30px !important;
+}
+.view--practice .stats-card {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.view--practice .stats-card > .card.card-pad {
+  padding: 22px 24px;
+}
+.view--practice .letter-pad {
+  margin-top: 4px;
+}
+.view--translate,
+.view--learn,
+.view--auth {
+  padding: 26px 28px 32px;
+  box-sizing: border-box;
+}
+@media (max-width: 720px) {
+  .view--practice,
+  .view--translate,
+  .view--learn,
+  .view--auth {
+    padding: 18px 16px 24px !important;
+  }
+  .view--practice .arena {
+    padding: 20px 18px !important;
+  }
 }

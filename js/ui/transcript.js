@@ -77,11 +77,15 @@ SB.Transcript = function (container, opts) {
     ensureStream(tok);
     appendBreakIfNeeded();
 
+    var raw = (tok && tok.text != null) ? String(tok.text) : "";
+    var text = raw.replace(/\s+/g, " ").trim();
+    if (!text) return;
+
     var span = document.createElement("span");
     span.className = "word " + SB.confClass(tok.conf);
     span.dataset.conf = tok.conf;
-    span.dataset.text = tok.text;
-    var label = (tok.glyph ? tok.glyph + " " : "") + tok.text;
+    span.dataset.text = text;
+    var label = (tok.glyph ? tok.glyph + " " : "") + text;
     /* trailing space so words read as a natural sentence */
     span.appendChild(document.createTextNode(label + " "));
     span.title = "Confidence " + SB.confPct(tok.conf);
