@@ -19,7 +19,8 @@
                               └── requestAnimationFrame overlay
 
    Never queue inference. Draw loop never waits on infer.
-   Dev HUD: ?perf=1 or ?debugTrack=1 (or settings.perfHud).
+   Stability: hand identity matching, jump/bone gates, stale-frame discard.
+   Dev HUD: ?perf=1 · debug raw/gated: ?debugTrack=1 (or settings.perfHud).
    ============================================================ */
 
 
@@ -40,12 +41,14 @@ SB.LiveEngine = function () {
   var workerReady = false;
   var useWorker = false;
   var detectId = 0;
+  var lastAcceptedDetectId = 0;
   var stream = null;
   var preferGpu = true;
   var forceCpu = false;
   var forceHolistic = false;
   var modelKind = "hands"; /* "hands" | "holistic" */
   var heavyFrame = 0;      /* odd frames skip classify/LSTM */
+  var showDebugTrack = false;
 
   var videoEl = null;
   var canvasEl = null;
@@ -69,6 +72,8 @@ SB.LiveEngine = function () {
   try {
     var q = (typeof location !== "undefined" && location.search) || "";
     showHud = /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(q);
+    showDebugTrack = /(?:^|[?&])debugTrack=1(?:&|$)/.test(q);
+    if (showDebugTrack) showHud = true;
     forceCpu = /(?:^|[?&])forceCpu=1(?:&|$)/.test(q);
     forceHolistic = /(?:^|[?&])holistic=1(?:&|$)/.test(q);
     if (!showHud && typeof SB !== "undefined" && SB.settings && SB.settings.perfHud) {
@@ -81,7 +86,8 @@ SB.LiveEngine = function () {
   var rawHands = { left: null, right: null, tMs: 0, mediaMs: 0 };
   var uiHands = { left: null, right: null };
   var prevRaw = { left: null, right: null, tMs: 0 };
-  /* Double-buffered clones so prevRaw never aliases the live buffer. */
+  var debugRawHands = { left: null, right: null }; /* ungated, for debug draw */
+  /* Double-buffered clones so slots never alias shared buffers. */
   var leftCloneA = [];
   var leftCloneB = [];
   var rightCloneA = [];
@@ -89,23 +95,17 @@ SB.LiveEngine = function () {
   var leftCloneFlip = false;
   var rightCloneFlip = false;
 
-  /* Tip-aware One Euro — fingers snappier than palm */
-  var leftFilter = new SB.HandLandmarkFilter({
-    minCutoff: 2.2, beta: 1.35, tipMinCutoff: 3.4, tipBeta: 2.4,
-  });
-  var rightFilter = new SB.HandLandmarkFilter({
-    minCutoff: 2.2, beta: 1.35, tipMinCutoff: 3.4, tipBeta: 2.4,
-  });
-  var leftUiBuf = [];
-  var rightUiBuf = [];
-  var leftPredBuf = [];
-  var rightPredBuf = [];
+  var FILTER_OPTS = {
+    minCutoff: 1.9, beta: 1.05, tipMinCutoff: 2.55, tipBeta: 1.55,
+  };
+  var leftSlot = new SB.HandTrackSlot("L", FILTER_OPTS);
+  var rightSlot = new SB.HandTrackSlot("R", FILTER_OPTS);
   var drawPtsBuf = [];
 
-  /* Latency compensation — tuned aggressively for “glued” overlay. */
-  var predictSec = 0.055;
-  var maxPredictNorm = 0.14;
-  var paintLeadSec = 0.055;
+  /* Latency compensation — capped so prediction can't spaghetti the skeleton. */
+  var predictSec = 0.032;
+  var maxPredictNorm = 0.055;
+  var paintLeadSec = 0.032;
 
   /*
    * Adaptive infer width: start modest, drop if e2e/FPS miss target.
@@ -151,6 +151,11 @@ SB.LiveEngine = function () {
     model: "hands",
     inferW: 0,
     inferH: 0,
+    stale: 0,
+    gated: 0,
+    holds: 0,
+    jumps: 0,
+    swapsBlocked: 0,
   };
   var camFrameCount = 0;
   var inferFrameCount = 0;
@@ -336,8 +341,8 @@ SB.LiveEngine = function () {
   }
 
   function tunePredictFromE2e(e2eMs) {
-    /* Aggressive lead: ~90% of measured e2e, capped for overshoot control */
-    predictSec = Math.min(0.12, Math.max(0.035, e2eMs / 1000 * 0.9));
+    /* Moderate lead — enough to feel glued, too much spaghetti-fies fingers */
+    predictSec = Math.min(0.05, Math.max(0.018, e2eMs / 1000 * 0.4));
   }
 
   function onWorkerMessage(ev) {
@@ -359,6 +364,13 @@ SB.LiveEngine = function () {
     if (msg.type === "result") {
       clearInferWatchdog();
       var now = performance.now();
+      /* Stale / out-of-order: only the newest detect id may update tracks */
+      if (msg.id != null && msg.id < lastAcceptedDetectId) {
+        stats.stale++;
+        inferenceBusy = false;
+        return;
+      }
+      if (msg.id != null) lastAcceptedDetectId = msg.id;
       stats.inferMs = msg.inferMs || 0;
       lastInferEndMs = now;
       inferFrameCount++;
@@ -377,6 +389,7 @@ SB.LiveEngine = function () {
             leftHandLandmarks: msg.leftHandLandmarks,
             rightHandLandmarks: msg.rightHandLandmarks,
             poseLandmarks: msg.poseLandmarks,
+            detections: msg.detections,
           },
           lastInferEndMs,
           msg.mediaMs
@@ -456,18 +469,33 @@ SB.LiveEngine = function () {
   }
 
   function normalizeMainResults(results) {
-    if (modelKind === "holistic") return results;
-    /* HandLandmarker → left/right groups */
+    if (modelKind === "holistic") {
+      var detsH = SB.detectionsFromGroups(
+        results.leftHandLandmarks,
+        results.rightHandLandmarks
+      );
+      return {
+        leftHandLandmarks: results.leftHandLandmarks,
+        rightHandLandmarks: results.rightHandLandmarks,
+        poseLandmarks: results.poseLandmarks,
+        detections: detsH,
+      };
+    }
+    /* HandLandmarker → detections + legacy groups */
     var left = [];
     var right = [];
+    var detections = [];
     var lms = results.landmarks || [];
     var handed = results.handedness || results.handednesses || [];
     for (var i = 0; i < lms.length; i++) {
       var label = "";
+      var score = 0.5;
       var h = handed[i];
       if (h && h.length && h[0]) {
         label = String(h[0].categoryName || h[0].displayName || "").toLowerCase();
+        if (typeof h[0].score === "number") score = h[0].score;
       }
+      detections.push({ landmarks: lms[i], label: label, score: score });
       if (label.indexOf("left") >= 0) left.push(lms[i]);
       else if (label.indexOf("right") >= 0) right.push(lms[i]);
       else if (!right.length) right.push(lms[i]);
@@ -477,6 +505,7 @@ SB.LiveEngine = function () {
       leftHandLandmarks: left,
       rightHandLandmarks: right,
       poseLandmarks: [],
+      detections: detections,
     };
   }
 
@@ -670,10 +699,17 @@ SB.LiveEngine = function () {
     uiHands.left = uiHands.right = null;
     prevRaw.left = prevRaw.right = null;
     prevRaw.tMs = 0;
-    leftFilter.reset();
-    rightFilter.reset();
+    debugRawHands.left = debugRawHands.right = null;
+    leftSlot.reset();
+    rightSlot.reset();
+    lastAcceptedDetectId = 0;
     stats.dropped = 0;
     stats.timeouts = 0;
+    stats.stale = 0;
+    stats.gated = 0;
+    stats.holds = 0;
+    stats.jumps = 0;
+    stats.swapsBlocked = 0;
     inferLatN = e2eLatN = confirmLatN = 0;
     _inferIdx.i = _e2eIdx.i = _confirmIdx.i = 0;
     gpuProbeDone = false;
@@ -880,39 +916,85 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
 
   function ingestResults(results, wallMs, mediaMs) {
-    /* Hands path labels via HandLandmarker handedness; Holistic is anatomical. */
     leftCloneFlip = !leftCloneFlip;
     rightCloneFlip = !rightCloneFlip;
-    var left = firstGroup(
-      results.leftHandLandmarks,
-      leftCloneFlip ? leftCloneA : leftCloneB
-    );
-    var right = firstGroup(
-      results.rightHandLandmarks,
-      rightCloneFlip ? rightCloneA : rightCloneB
-    );
 
-    prevRaw.left = rawHands.left;
-    prevRaw.right = rawHands.right;
+    var detections = results.detections;
+    if (!detections || !detections.length) {
+      detections = SB.detectionsFromGroups(
+        results.leftHandLandmarks,
+        results.rightHandLandmarks
+      );
+    }
+
+    /* Clone landmark arrays into flip buffers so slots own stable copies */
+    var cloned = [];
+    for (var di = 0; di < detections.length; di++) {
+      var src = detections[di].landmarks;
+      if (!src || !src.length) continue;
+      var buf = (cloned.length & 1)
+        ? (rightCloneFlip ? rightCloneA : rightCloneB)
+        : (leftCloneFlip ? leftCloneA : leftCloneB);
+      /* Use unique buffers per detection index */
+      if (di === 0) buf = leftCloneFlip ? leftCloneA : leftCloneB;
+      else buf = rightCloneFlip ? rightCloneA : rightCloneB;
+      cloned.push({
+        landmarks: cloneLandmarks(src, buf),
+        label: detections[di].label || "",
+        score: detections[di].score || 0.5,
+      });
+    }
+
+    var assigned = SB.assignHandDetections(cloned, leftSlot, rightSlot);
+    if (assigned.swapsBlocked) stats.swapsBlocked += assigned.swapsBlocked;
+
+    debugRawHands.left = assigned.left;
+    debugRawHands.right = assigned.right;
+
+    var leftUp = leftSlot.update(assigned.left, wallMs);
+    var rightUp = rightSlot.update(assigned.right, wallMs);
+
+    if (leftSlot.debug.gated) {
+      stats.gated++;
+      if (leftSlot.debug.reason === "palmJump" || leftSlot.debug.reason === "tipJump") {
+        stats.jumps++;
+      }
+    }
+    if (rightSlot.debug.gated) {
+      stats.gated++;
+      if (rightSlot.debug.reason === "palmJump" || rightSlot.debug.reason === "tipJump") {
+        stats.jumps++;
+      }
+    }
+    if (leftUp.held) stats.holds++;
+    if (rightUp.held) stats.holds++;
+
+    prevRaw.left = leftSlot.prevRaw;
+    prevRaw.right = rightSlot.prevRaw;
     prevRaw.tMs = rawHands.tMs;
 
-    rawHands.left = left;
-    rawHands.right = right;
+    /* Only accepted (or held last-good) poses become "raw" for prediction */
+    rawHands.left = leftUp.accepted || leftUp.held ? leftSlot.lastGood : null;
+    rawHands.right = rightUp.accepted || rightUp.held ? rightSlot.lastGood : null;
     rawHands.tMs = wallMs;
     rawHands.mediaMs = mediaMs;
 
-    var handCount = (left ? 1 : 0) + (right ? 1 : 0);
+    uiHands.left = leftUp.ui;
+    uiHands.right = rightUp.ui;
+
+    var handCount = (uiHands.left ? 1 : 0) + (uiHands.right ? 1 : 0);
     stats.hands = handCount;
     if (SB.Engine && SB.Engine._hands) SB.Engine._hands(handCount);
 
-    /* Always refresh overlay filters — never wait on classify/LSTM */
-    updateUiFromRaw(wallMs);
-
     heavyFrame++;
-    var runHeavy = (heavyFrame & 1) === 0; /* every other infer frame */
+    var runHeavy = (heavyFrame & 1) === 0;
 
+    /* Never feed gated/held-only garbage to classifier — require accepted */
     if (runHeavy && classifier) {
-      var classifierHand = right || left;
+      var classifierHand =
+        (leftUp.accepted && leftSlot.lastRaw) ||
+        (rightUp.accepted && rightSlot.lastRaw) ||
+        null;
       if (classifierHand) {
         var features = landmarkVector(classifierHand);
         var token = null;
@@ -928,9 +1010,16 @@ SB.LiveEngine = function () {
 
     if (!runHeavy) return;
 
-    var snapResults = results;
-    var snapLeft = left;
-    var snapRight = right;
+    /* LSTM/training only on accepted landmarks (stable shape) */
+    var snapLeft = leftUp.accepted ? leftSlot.lastRaw : null;
+    var snapRight = rightUp.accepted ? rightSlot.lastRaw : null;
+    if (!snapLeft && !snapRight && modelKind !== "holistic") return;
+
+    var snapResults = {
+      leftHandLandmarks: snapLeft ? [snapLeft] : [],
+      rightHandLandmarks: snapRight ? [snapRight] : [],
+      poseLandmarks: results.poseLandmarks || [],
+    };
     queueMicrotask(function () {
       if (window.TrainingRecorder &&
           typeof window.TrainingRecorder.processFrame === "function") {
@@ -952,12 +1041,6 @@ SB.LiveEngine = function () {
     });
   }
 
-  /* Holistic returns each hand as an array of detections; take the first. */
-  function firstGroup(list, buf) {
-    if (!list || !list.length || !list[0] || !list[0].length) return null;
-    return cloneLandmarks(list[0], buf);
-  }
-
   function cloneLandmarks(src, buf) {
     var out = buf || [];
     for (var i = 0; i < src.length; i++) {
@@ -968,22 +1051,6 @@ SB.LiveEngine = function () {
     }
     out.length = src.length;
     return out;
-  }
-
-  function updateUiFromRaw(wallMs) {
-    var tSec = wallMs / 1000;
-    if (rawHands.left) {
-      uiHands.left = leftFilter.apply(tSec, rawHands.left, leftUiBuf);
-    } else {
-      leftFilter.noteMiss();
-      uiHands.left = null;
-    }
-    if (rawHands.right) {
-      uiHands.right = rightFilter.apply(tSec, rawHands.right, rightUiBuf);
-    } else {
-      rightFilter.noteMiss();
-      uiHands.right = null;
-    }
   }
 
   // ----------------------------------------------------------
@@ -1011,21 +1078,35 @@ SB.LiveEngine = function () {
 
   function predictHand(filtered, raw, prev, dtSec, leadSec, outBuf) {
     if (!filtered) return null;
-    if (!raw || !prev || dtSec <= 1e-4 || leadSec <= 0) return filtered;
+    if (!raw || !prev || !prev.length || dtSec <= 1e-4 || leadSec <= 0) {
+      return filtered;
+    }
+    /* Require same topology length — never predict across identity swaps */
+    if (prev.length !== raw.length || filtered.length !== raw.length) return filtered;
+
     var out = outBuf || [];
-    var tipBoost = 1.15; /* fingertips lead a bit more than palm */
     for (var i = 0; i < filtered.length; i++) {
       if (!out[i]) out[i] = { x: 0, y: 0, z: 0 };
+      if (!raw[i] || !prev[i]) {
+        out[i].x = filtered[i].x;
+        out[i].y = filtered[i].y;
+        out[i].z = filtered[i].z;
+        continue;
+      }
       var vx = (raw[i].x - prev[i].x) / dtSec;
       var vy = (raw[i].y - prev[i].y) / dtSec;
-      var lead = leadSec;
-      if (SB._TIP_IDX && SB._TIP_IDX[i]) lead *= tipBoost;
-      var dx = vx * lead;
-      var dy = vy * lead;
+      /* Clamp velocity in norm-units/sec to kill tip teleport prediction */
+      var spd = Math.sqrt(vx * vx + vy * vy);
+      var maxSpd = SB._TIP_IDX && SB._TIP_IDX[i] ? 2.8 : 2.2;
+      if (spd > maxSpd) {
+        vx = (vx / spd) * maxSpd;
+        vy = (vy / spd) * maxSpd;
+      }
+      var dx = vx * leadSec;
+      var dy = vy * leadSec;
       var mag = Math.sqrt(dx * dx + dy * dy);
-      var cap = maxPredictNorm * (SB._TIP_IDX && SB._TIP_IDX[i] ? 1.25 : 1);
-      if (mag > cap) {
-        var s = cap / mag;
+      if (mag > maxPredictNorm) {
+        var s = maxPredictNorm / mag;
         dx *= s;
         dy *= s;
       }
@@ -1053,29 +1134,44 @@ SB.LiveEngine = function () {
     stats.frameAgeMs = age;
 
     /*
-     * Glued feel: extrapolate by (frame age → bring to "now") plus a slice
-     * of measured e2e so we stay ahead of the next delayed measurement.
+     * Modest lead: partial age compensation + small e2e slice.
+     * Full age+e2e extrapolation was the main spaghetti source in pass 2.
      */
     paintLeadSec = Math.min(
-      0.13,
-      Math.max(predictSec, age / 1000 + predictSec * 0.35)
+      0.05,
+      Math.max(predictSec, age / 1000 * 0.35 + predictSec * 0.5)
     );
 
-    var dtSec = prevRaw.tMs ? (rawHands.tMs - prevRaw.tMs) / 1000 : 0;
-    if (dtSec < 1e-4 && age > 0) dtSec = Math.max(0.016, age / 1000);
+    var dtSec = 0;
+    if (leftSlot.lastRaw && leftSlot.prevRaw && leftSlot.lastTMs) {
+      /* prefer per-slot dt when available */
+    }
+    if (prevRaw.left && rawHands.left && rawHands.tMs && prevRaw.tMs) {
+      dtSec = (rawHands.tMs - prevRaw.tMs) / 1000;
+    }
+    if (dtSec < 1e-4) dtSec = 1 / 30;
 
     var leftDraw = predictHand(
-      uiHands.left, rawHands.left, prevRaw.left, dtSec, paintLeadSec, leftPredBuf
+      uiHands.left, rawHands.left, prevRaw.left, dtSec, paintLeadSec, leftSlot.predBuf
     );
     var rightDraw = predictHand(
-      uiHands.right, rawHands.right, prevRaw.right, dtSec, paintLeadSec, rightPredBuf
+      uiHands.right, rawHands.right, prevRaw.right, dtSec, paintLeadSec, rightSlot.predBuf
     );
 
-    if (leftDraw) drawHand(ctx, leftDraw, "L");
-    if (rightDraw) drawHand(ctx, rightDraw, "R");
+    if (showDebugTrack) {
+      if (debugRawHands.left) drawHand(ctx, debugRawHands.left, "rawL", true);
+      if (debugRawHands.right) drawHand(ctx, debugRawHands.right, "rawR", true);
+    }
+
+    if (leftDraw) {
+      drawHand(ctx, leftDraw, leftSlot.debug.gated ? "L!" : "L", false);
+    }
+    if (rightDraw) {
+      drawHand(ctx, rightDraw, rightSlot.debug.gated ? "R!" : "R", false);
+    }
   }
 
-  function drawHand(ctx, landmarks, label) {
+  function drawHand(ctx, landmarks, label, isDebugRaw) {
     var w = canvasEl.width;
     var h = canvasEl.height;
     var n = landmarks.length;
@@ -1089,9 +1185,9 @@ SB.LiveEngine = function () {
       drawPtsBuf[i].y = y;
     }
 
-    ctx.lineWidth = 1.75;
+    ctx.lineWidth = isDebugRaw ? 1 : 1.75;
     ctx.lineCap = "round";
-    ctx.strokeStyle = "rgba(52, 224, 192, .42)";
+    ctx.strokeStyle = isDebugRaw ? "rgba(255,80,80,.35)" : "rgba(52, 224, 192, .42)";
     ctx.beginPath();
     for (var c = 0; c < HAND_CONNECTIONS.length; c++) {
       var a = HAND_CONNECTIONS[c][0];
@@ -1106,14 +1202,16 @@ SB.LiveEngine = function () {
 
     for (var j = 0; j < n; j++) {
       var pt = drawPtsBuf[j];
-      var r = j === 0 ? 4.5 : 2.75;
+      var r = isDebugRaw ? 1.8 : (j === 0 ? 4.5 : 2.75);
       ctx.beginPath();
       ctx.arc(pt.x, pt.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = j === 0 ? "rgba(255,180,84,.95)" : "rgba(139,140,255,.85)";
+      ctx.fillStyle = isDebugRaw
+        ? "rgba(255,100,100,.55)"
+        : (j === 0 ? "rgba(255,180,84,.95)" : "rgba(139,140,255,.85)");
       ctx.fill();
     }
 
-    if (label && landmarks[0]) {
+    if (label && landmarks[0] && !isDebugRaw) {
       var wx = drawPtsBuf[0].x;
       var wy = drawPtsBuf[0].y;
       ctx.font = "600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
@@ -1127,7 +1225,7 @@ SB.LiveEngine = function () {
     }
 
     /* Red ring while saving training frames — visible feedback only */
-    if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" && SB.DataCapture.isRecording()) {
+    if (!isDebugRaw && SB.DataCapture && typeof SB.DataCapture.isRecording === "function" && SB.DataCapture.isRecording()) {
       ctx.strokeStyle = "rgba(255, 90, 90, .85)";
       ctx.lineWidth = 4;
       ctx.strokeRect(8, 8, canvasEl.width - 16, canvasEl.height - 16);
@@ -1225,6 +1323,11 @@ SB.LiveEngine = function () {
       " · Age " + stats.frameAgeMs.toFixed(0) + "ms" +
       " · Drop " + stats.dropped +
       (stats.timeouts ? " · TO " + stats.timeouts : "") +
+      " · Gate " + stats.gated +
+      " · Jump " + stats.jumps +
+      " · Hold " + stats.holds +
+      (stats.stale ? " · Stale " + stats.stale : "") +
+      (stats.swapsBlocked ? " · SwapBlk " + stats.swapsBlocked : "") +
       " · Hands " + stats.hands +
       " · " + stats.inferW + "×" + stats.inferH +
       " · " + stats.backend;

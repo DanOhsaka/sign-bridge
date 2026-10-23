@@ -137,22 +137,32 @@ async function createModel(kind, preferGpu) {
 function handsToGroups(results) {
   var left = [];
   var right = [];
+  var detections = [];
   var lms = results.landmarks || [];
   var handed = results.handedness || results.handednesses || [];
   for (var i = 0; i < lms.length; i++) {
     var pts = serializePoints(lms[i]);
     if (!pts) continue;
     var label = "";
+    var score = 0.5;
     var h = handed[i];
     if (h && h.length && h[0]) {
       label = String(h[0].categoryName || h[0].displayName || "").toLowerCase();
+      if (typeof h[0].score === "number") score = h[0].score;
     }
+    detections.push({ landmarks: pts, label: label, score: score });
+    /* Keep legacy groups for older consumers — live.js prefers detections. */
     if (label.indexOf("left") >= 0) left.push(pts);
     else if (label.indexOf("right") >= 0) right.push(pts);
     else if (!right.length) right.push(pts);
     else left.push(pts);
   }
-  return { leftHandLandmarks: left, rightHandLandmarks: right, poseLandmarks: [] };
+  return {
+    leftHandLandmarks: left,
+    rightHandLandmarks: right,
+    poseLandmarks: [],
+    detections: detections,
+  };
 }
 
 self.onmessage = function (ev) {
@@ -190,11 +200,20 @@ self.onmessage = function (ev) {
 
       var payload;
       if (modelKind === "holistic") {
+        var lh = serializeGroups(results.leftHandLandmarks);
+        var rh = serializeGroups(results.rightHandLandmarks);
         payload = {
-          leftHandLandmarks: serializeGroups(results.leftHandLandmarks),
-          rightHandLandmarks: serializeGroups(results.rightHandLandmarks),
+          leftHandLandmarks: lh,
+          rightHandLandmarks: rh,
           poseLandmarks: serializeGroups(results.poseLandmarks),
+          detections: [],
         };
+        for (var li = 0; li < lh.length; li++) {
+          payload.detections.push({ landmarks: lh[li], label: "left", score: 0.85 });
+        }
+        for (var ri = 0; ri < rh.length; ri++) {
+          payload.detections.push({ landmarks: rh[ri], label: "right", score: 0.85 });
+        }
       } else {
         payload = handsToGroups(results);
       }
@@ -209,6 +228,7 @@ self.onmessage = function (ev) {
         leftHandLandmarks: payload.leftHandLandmarks,
         rightHandLandmarks: payload.rightHandLandmarks,
         poseLandmarks: payload.poseLandmarks,
+        detections: payload.detections || [],
       });
     } catch (err) {
       if (msg.bitmap && msg.bitmap.close) {
