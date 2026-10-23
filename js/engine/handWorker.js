@@ -1,20 +1,22 @@
 /* ============================================================
-   SignBridge — Holistic landmarker Web Worker (classic)
+   SignBridge — Hand / Holistic landmarker Web Worker (classic)
    Must be a classic worker: MediaPipe's WASM loader calls
    importScripts(), which module workers disallow.
-   Dynamic import() loads the ESM vision bundle.
 
-   HolisticLandmarker is the model the LSTM was trained against
-   (see dev/stan). One pass returns anatomical left/right hands
-   plus the pose points createReadableFrame normalizes around.
+   Default model: HandLandmarker (fast skeleton). Holistic is
+   optional when pose is required (training / LSTM).
    ============================================================ */
 
-/* global importScripts */
-
-var holistic = null;
+var landmarker = null;
+var modelKind = "hands"; /* "hands" | "holistic" */
 var FilesetResolver = null;
+var HandLandmarker = null;
 var HolisticLandmarker = null;
 var visionFileset = null;
+
+var HAND_MODEL =
+  "https://storage.googleapis.com/mediapipe-models/" +
+  "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
 var HOLISTIC_MODEL =
   "https://storage.googleapis.com/mediapipe-models/" +
@@ -41,25 +43,46 @@ function serializeGroups(list) {
 }
 
 async function ensureVision() {
-  if (visionFileset && HolisticLandmarker) return;
+  if (visionFileset && HandLandmarker && HolisticLandmarker) return;
   var visionModule = await import(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm"
   );
   FilesetResolver = visionModule.FilesetResolver;
+  HandLandmarker = visionModule.HandLandmarker;
   HolisticLandmarker = visionModule.HolisticLandmarker;
   visionFileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
   );
 }
 
-function buildOpts(delegate) {
+function closeLandmarker() {
+  if (landmarker && typeof landmarker.close === "function") {
+    try { landmarker.close(); } catch (e) {}
+  }
+  landmarker = null;
+}
+
+function buildHandOpts(delegate) {
+  return {
+    baseOptions: {
+      modelAssetPath: HAND_MODEL,
+      delegate: delegate,
+    },
+    runningMode: "VIDEO",
+    numHands: 2,
+    minHandDetectionConfidence: 0.45,
+    minHandPresenceConfidence: 0.45,
+    minTrackingConfidence: 0.45,
+  };
+}
+
+function buildHolisticOpts(delegate) {
   return {
     baseOptions: {
       modelAssetPath: HOLISTIC_MODEL,
       delegate: delegate,
     },
     runningMode: "VIDEO",
-    /* Skip unused heavy outputs — hands + pose are what we consume. */
     outputFaceBlendshapes: false,
     outputPoseSegmentationMasks: false,
     minHandDetectionConfidence: 0.5,
@@ -69,55 +92,81 @@ function buildOpts(delegate) {
   };
 }
 
-async function createHolistic(preferGpu) {
+async function createModel(kind, preferGpu) {
   await ensureVision();
-  if (holistic && typeof holistic.close === "function") {
-    try { holistic.close(); } catch (e) {}
-  }
-  holistic = null;
+  closeLandmarker();
+  modelKind = kind === "holistic" ? "holistic" : "hands";
 
-  var opts = buildOpts(preferGpu ? "GPU" : "CPU");
-  try {
-    holistic = await HolisticLandmarker.createFromOptions(visionFileset, opts);
-    return { delegate: opts.baseOptions.delegate };
-  } catch (err) {
-    if (preferGpu) {
-      opts = buildOpts("CPU");
-      holistic = await HolisticLandmarker.createFromOptions(visionFileset, opts);
+  var tryGpu = preferGpu !== false;
+  var delegates = tryGpu ? ["GPU", "CPU"] : ["CPU"];
+  var lastErr = null;
+
+  for (var i = 0; i < delegates.length; i++) {
+    var del = delegates[i];
+    try {
+      if (modelKind === "holistic") {
+        landmarker = await HolisticLandmarker.createFromOptions(
+          visionFileset,
+          buildHolisticOpts(del)
+        );
+      } else {
+        landmarker = await HandLandmarker.createFromOptions(
+          visionFileset,
+          buildHandOpts(del)
+        );
+      }
       return {
-        delegate: "CPU",
-        fallback: String(err && err.message || err),
+        delegate: del,
+        model: modelKind,
+        fallback: del === "CPU" && tryGpu ? "GPU create failed" : null,
       };
+    } catch (err) {
+      lastErr = err;
     }
-    throw err;
   }
+  throw lastErr || new Error("Landmarker create failed");
 }
 
-async function init(preferGpu) {
-  return createHolistic(preferGpu !== false);
+/**
+ * HandLandmarker returns landmarks[] + handedness[] (categoryName Left/Right).
+ * Map into Holistic-shaped left/right groups for the rest of the pipeline.
+ * Mirror-aware: MediaPipe labels are from the subject's view; with a selfie
+ * camera the engine may swap — live.js mirror is display-only, so we keep
+ * anatomical labels from the model.
+ */
+function handsToGroups(results) {
+  var left = [];
+  var right = [];
+  var lms = results.landmarks || [];
+  var handed = results.handedness || results.handednesses || [];
+  for (var i = 0; i < lms.length; i++) {
+    var pts = serializePoints(lms[i]);
+    if (!pts) continue;
+    var label = "";
+    var h = handed[i];
+    if (h && h.length && h[0]) {
+      label = String(h[0].categoryName || h[0].displayName || "").toLowerCase();
+    }
+    if (label.indexOf("left") >= 0) left.push(pts);
+    else if (label.indexOf("right") >= 0) right.push(pts);
+    else if (!right.length) right.push(pts);
+    else left.push(pts);
+  }
+  return { leftHandLandmarks: left, rightHandLandmarks: right, poseLandmarks: [] };
 }
 
 self.onmessage = function (ev) {
   var msg = ev.data || {};
 
-  if (msg.type === "init") {
-    init(msg.preferGpu !== false)
+  if (msg.type === "init" || msg.type === "reinit") {
+    var kind = msg.model === "holistic" ? "holistic" : "hands";
+    createModel(kind, msg.preferGpu !== false)
       .then(function (info) {
-        self.postMessage({ type: "ready", info: info });
-      })
-      .catch(function (err) {
         self.postMessage({
-          type: "error",
-          error: String(err && err.message || err),
+          type: "ready",
+          info: info,
+          reinit: msg.type === "reinit",
         });
-      });
-    return;
-  }
-
-  if (msg.type === "reinit") {
-    createHolistic(msg.preferGpu === true)
-      .then(function (info) {
-        self.postMessage({ type: "ready", info: info, reinit: true });
       })
       .catch(function (err) {
         self.postMessage({
@@ -129,24 +178,37 @@ self.onmessage = function (ev) {
   }
 
   if (msg.type === "detect") {
-    if (!holistic) {
+    if (!landmarker) {
       if (msg.bitmap && msg.bitmap.close) msg.bitmap.close();
       self.postMessage({ type: "error", id: msg.id, error: "Landmarker not ready" });
       return;
     }
     try {
       var t0 = performance.now();
-      var results = holistic.detectForVideo(msg.bitmap, msg.timestamp);
+      var results = landmarker.detectForVideo(msg.bitmap, msg.timestamp);
       if (msg.bitmap && msg.bitmap.close) msg.bitmap.close();
+
+      var payload;
+      if (modelKind === "holistic") {
+        payload = {
+          leftHandLandmarks: serializeGroups(results.leftHandLandmarks),
+          rightHandLandmarks: serializeGroups(results.rightHandLandmarks),
+          poseLandmarks: serializeGroups(results.poseLandmarks),
+        };
+      } else {
+        payload = handsToGroups(results);
+      }
+
       self.postMessage({
         type: "result",
         id: msg.id,
+        model: modelKind,
         inferMs: performance.now() - t0,
         wallSentMs: msg.wallSentMs,
         mediaMs: msg.timestamp,
-        leftHandLandmarks: serializeGroups(results.leftHandLandmarks),
-        rightHandLandmarks: serializeGroups(results.rightHandLandmarks),
-        poseLandmarks: serializeGroups(results.poseLandmarks),
+        leftHandLandmarks: payload.leftHandLandmarks,
+        rightHandLandmarks: payload.rightHandLandmarks,
+        poseLandmarks: payload.poseLandmarks,
       });
     } catch (err) {
       if (msg.bitmap && msg.bitmap.close) {

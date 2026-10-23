@@ -2,6 +2,7 @@
    SignBridge — One Euro Filter (oneEuro.js)
    Motion-aware smoothing: stable when slow, responsive when fast.
    Used for UI landmark overlay only — not for recognition features.
+   Tip joints use snappier params than palm/wrist.
    ============================================================ */
 
 window.SB = window.SB || {};
@@ -63,30 +64,60 @@ SB._oneEuroLowpass = function (x, xPrev, a) {
   return a * x + (1 - a) * xPrev;
 };
 
+/** MediaPipe tip landmark indices */
+SB._TIP_IDX = { 4: 1, 8: 1, 12: 1, 16: 1, 20: 1 };
+/** Intermediate finger joints — slightly snappier than palm */
+SB._MID_IDX = { 3: 1, 6: 1, 7: 1, 10: 1, 11: 1, 14: 1, 15: 1, 18: 1, 19: 1 };
+
 /**
  * Per-hand landmark filter bank: 21 joints × (x,y[,z]).
- * Adaptive: raises beta when landmarks move fast; soft-resets after gaps.
+ * Tips get higher minCutoff/beta than palm so fingers feel glued.
  */
 SB.HandLandmarkFilter = function (opts) {
   opts = opts || {};
-  this.baseMinCutoff = opts.minCutoff == null ? 1.8 : opts.minCutoff;
-  this.baseBeta = opts.beta == null ? 0.95 : opts.beta;
-  this.dCutoff = opts.dCutoff == null ? 1.0 : opts.dCutoff;
+  this.palmMinCutoff = opts.minCutoff == null ? 2.2 : opts.minCutoff;
+  this.palmBeta = opts.beta == null ? 1.35 : opts.beta;
+  this.tipMinCutoff = opts.tipMinCutoff == null ? 3.4 : opts.tipMinCutoff;
+  this.tipBeta = opts.tipBeta == null ? 2.4 : opts.tipBeta;
+  this.dCutoff = opts.dCutoff == null ? 1.15 : opts.dCutoff;
   this.includeZ = !!opts.includeZ;
-  this.minCutoff = this.baseMinCutoff;
-  this.beta = this.baseBeta;
+  this.minCutoff = this.palmMinCutoff;
+  this.beta = this.palmBeta;
   this.filters = [];
   this._lastT = null;
   this._misses = 0;
+  this._speedBoost = 0;
   this._ensure(21);
+};
+
+SB.HandLandmarkFilter.prototype._paramsForIndex = function (i) {
+  var boost = this._speedBoost;
+  if (SB._TIP_IDX[i]) {
+    return {
+      minCutoff: this.tipMinCutoff + boost * 0.8,
+      beta: this.tipBeta + boost * 1.1,
+    };
+  }
+  if (SB._MID_IDX[i]) {
+    return {
+      minCutoff: (this.palmMinCutoff + this.tipMinCutoff) * 0.5 + boost * 0.4,
+      beta: (this.palmBeta + this.tipBeta) * 0.5 + boost * 0.55,
+    };
+  }
+  return {
+    minCutoff: this.palmMinCutoff + boost * 0.25,
+    beta: this.palmBeta + boost * 0.35,
+  };
 };
 
 SB.HandLandmarkFilter.prototype._ensure = function (n) {
   while (this.filters.length < n) {
+    var idx = this.filters.length;
+    var p = this._paramsForIndex(idx);
     this.filters.push({
-      x: new SB.OneEuroFilter(this.minCutoff, this.beta, this.dCutoff),
-      y: new SB.OneEuroFilter(this.minCutoff, this.beta, this.dCutoff),
-      z: new SB.OneEuroFilter(this.minCutoff, this.beta, this.dCutoff),
+      x: new SB.OneEuroFilter(p.minCutoff, p.beta, this.dCutoff),
+      y: new SB.OneEuroFilter(p.minCutoff, p.beta, this.dCutoff),
+      z: new SB.OneEuroFilter(p.minCutoff, p.beta, this.dCutoff),
     });
   }
 };
@@ -99,8 +130,7 @@ SB.HandLandmarkFilter.prototype.reset = function () {
   }
   this._lastT = null;
   this._misses = 0;
-  this.minCutoff = this.baseMinCutoff;
-  this.beta = this.baseBeta;
+  this._speedBoost = 0;
 };
 
 SB.HandLandmarkFilter.prototype.softReset = function () {
@@ -114,17 +144,16 @@ SB.HandLandmarkFilter.prototype.softReset = function () {
 
 SB.HandLandmarkFilter.prototype.noteMiss = function () {
   this._misses++;
-  /* Brief occlusion: soft reset so reacquire isn't oversmoothed.
-     Longer gaps: hard reset. */
   if (this._misses === 2) this.softReset();
   else if (this._misses >= 6) this.reset();
 };
 
 SB.HandLandmarkFilter.prototype._applyParams = function () {
   for (var i = 0; i < this.filters.length; i++) {
-    this.filters[i].x.setParams(this.minCutoff, this.beta, this.dCutoff);
-    this.filters[i].y.setParams(this.minCutoff, this.beta, this.dCutoff);
-    this.filters[i].z.setParams(this.minCutoff, this.beta, this.dCutoff);
+    var p = this._paramsForIndex(i);
+    this.filters[i].x.setParams(p.minCutoff, p.beta, this.dCutoff);
+    this.filters[i].y.setParams(p.minCutoff, p.beta, this.dCutoff);
+    this.filters[i].z.setParams(p.minCutoff, p.beta, this.dCutoff);
   }
 };
 
@@ -141,27 +170,19 @@ SB.HandLandmarkFilter.prototype.apply = function (tSec, landmarks, out) {
   this._misses = 0;
   this._ensure(landmarks.length);
 
-  /* Adaptive responsiveness from wrist + middle-tip speed */
   if (this._lastT != null && landmarks[0] && this.filters[0].x.xPrev != null) {
     var dt = Math.max(1e-3, tSec - this._lastT);
     var wx = landmarks[0].x - this.filters[0].x.xPrev;
     var wy = landmarks[0].y - this.filters[0].y.xPrev;
-    var tip = landmarks[12] || landmarks[8] || landmarks[0];
-    var fTip = this.filters[12] || this.filters[8] || this.filters[0];
+    var tip = landmarks[8] || landmarks[12] || landmarks[0];
+    var fTip = this.filters[8] || this.filters[12] || this.filters[0];
     var tx = tip.x - (fTip.x.xPrev != null ? fTip.x.xPrev : tip.x);
     var ty = tip.y - (fTip.y.xPrev != null ? fTip.y.xPrev : tip.y);
     var speed = Math.sqrt(wx * wx + wy * wy + tx * tx + ty * ty) / dt;
-    /* speed in norm-units/sec; ~0.2 idle, >1.5 fast swipe */
-    if (speed > 1.2) {
-      this.minCutoff = this.baseMinCutoff + 0.6;
-      this.beta = this.baseBeta + 0.85;
-    } else if (speed > 0.45) {
-      this.minCutoff = this.baseMinCutoff + 0.25;
-      this.beta = this.baseBeta + 0.35;
-    } else {
-      this.minCutoff = this.baseMinCutoff;
-      this.beta = this.baseBeta;
-    }
+    if (speed > 1.8) this._speedBoost = 1;
+    else if (speed > 0.7) this._speedBoost = 0.55;
+    else if (speed > 0.3) this._speedBoost = 0.2;
+    else this._speedBoost = 0;
     this._applyParams();
   }
   this._lastT = tSec;

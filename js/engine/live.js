@@ -5,19 +5,20 @@
 
      Camera (display) ──────────────► <video>
            │
-           ▼ (downscale branch)
-     Inference canvas ≤720px (640 on CPU)
+           ▼ (adaptive downscale ≤560/480/360)
+     Inference canvas (overlay stays full-res)
            │
            ▼ requestVideoFrameCallback + busy gate + watchdog
-     HolisticLandmarker in Web Worker (GPU with CPU fallback)
+     HandLandmarker in Web Worker (default; Holistic if ?holistic=1
+     or while training records — pose needed for LSTM)
            │
-           ├── left/right hand landmarks ──► classifier / recognition
-           ├── pose landmarks ──► LSTM frame normalizer
+           ├── left/right hand landmarks ──► UI (always) + classify (½)
+           ├── pose (Holistic only) ──► LSTM (½ rate)
            │
-           └── UI buffer ──► adaptive One Euro + short prediction
+           └── adaptive One Euro + age-based prediction
                               └── requestAnimationFrame overlay
 
-   Never queue inference. If the model is busy, drop the frame.
+   Never queue inference. Draw loop never waits on infer.
    Dev HUD: ?perf=1 or ?debugTrack=1 (or settings.perfHud).
    ============================================================ */
 
@@ -34,7 +35,7 @@ SB.LiveEngine = function () {
   var state = "off";
   var classifier = null;
 
-  var landmarker = null;   /* main-thread fallback only (HolisticLandmarker) */
+  var landmarker = null;   /* main-thread fallback only */
   var worker = null;
   var workerReady = false;
   var useWorker = false;
@@ -42,6 +43,9 @@ SB.LiveEngine = function () {
   var stream = null;
   var preferGpu = true;
   var forceCpu = false;
+  var forceHolistic = false;
+  var modelKind = "hands"; /* "hands" | "holistic" */
+  var heavyFrame = 0;      /* odd frames skip classify/LSTM */
 
   var videoEl = null;
   var canvasEl = null;
@@ -66,10 +70,12 @@ SB.LiveEngine = function () {
     var q = (typeof location !== "undefined" && location.search) || "";
     showHud = /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(q);
     forceCpu = /(?:^|[?&])forceCpu=1(?:&|$)/.test(q);
+    forceHolistic = /(?:^|[?&])holistic=1(?:&|$)/.test(q);
     if (!showHud && typeof SB !== "undefined" && SB.settings && SB.settings.perfHud) {
       showHud = true;
     }
   } catch (e) {}
+  modelKind = forceHolistic ? "holistic" : "hands";
 
   /* Latest measured hands (recognition) + UI hands (filtered/predicted) */
   var rawHands = { left: null, right: null, tMs: 0, mediaMs: 0 };
@@ -83,31 +89,38 @@ SB.LiveEngine = function () {
   var leftCloneFlip = false;
   var rightCloneFlip = false;
 
-  /* Snappier defaults; HandLandmarkFilter adapts beta on fast motion */
-  var leftFilter = new SB.HandLandmarkFilter({ minCutoff: 1.85, beta: 1.05 });
-  var rightFilter = new SB.HandLandmarkFilter({ minCutoff: 1.85, beta: 1.05 });
+  /* Tip-aware One Euro — fingers snappier than palm */
+  var leftFilter = new SB.HandLandmarkFilter({
+    minCutoff: 2.2, beta: 1.35, tipMinCutoff: 3.4, tipBeta: 2.4,
+  });
+  var rightFilter = new SB.HandLandmarkFilter({
+    minCutoff: 2.2, beta: 1.35, tipMinCutoff: 3.4, tipBeta: 2.4,
+  });
   var leftUiBuf = [];
   var rightUiBuf = [];
   var leftPredBuf = [];
   var rightPredBuf = [];
   var drawPtsBuf = [];
 
-  /* Latency compensation for overlay only (seconds of extrapolation). */
-  var predictSec = 0.04;
-  var maxPredictNorm = 0.1;
+  /* Latency compensation — tuned aggressively for “glued” overlay. */
+  var predictSec = 0.055;
+  var maxPredictNorm = 0.14;
+  var paintLeadSec = 0.055;
 
   /*
-   * Holistic at 1280px saturates CPU/GPU and inflates age.
-   * Landmarks are normalized by shoulder width for LSTM, so 720 is the
-   * responsiveness default; CPU fallback uses 640.
+   * Adaptive infer width: start modest, drop if e2e/FPS miss target.
+   * Display/overlay always uses full video resolution.
    */
-  var INFER_MAX_W_GPU = 720;
-  var INFER_MAX_W_CPU = 640;
+  var INFER_MAX_W_GPU = 560;
+  var INFER_MAX_W_CPU = 480;
+  var INFER_MAX_W_LOW = 360;
   var INFER_MAX_W = INFER_MAX_W_GPU;
+  var TARGET_INFER_FPS = 18;
+  var TARGET_E2E_MS = 70;
 
   /* Busy-gate watchdog — GPU can hang on some headless/SwiftShader hosts. */
-  var INFER_WATCHDOG_MS = 900;
-  var GPU_PROBE_MS = 2500;
+  var INFER_WATCHDOG_MS = 700;
+  var GPU_PROBE_MS = 1800;
   var gpuProbeDone = false;
   var gpuFallbackTried = false;
 
@@ -135,6 +148,7 @@ SB.LiveEngine = function () {
     timeouts: 0,
     hands: 0,
     backend: "—",
+    model: "hands",
     inferW: 0,
     inferH: 0,
   };
@@ -179,12 +193,29 @@ SB.LiveEngine = function () {
   }
 
   // ----------------------------------------------------------
-  // Load HolisticLandmarker — prefer Web Worker, fall back to main
+  // Load HandLandmarker (default) — prefer Web Worker
   // ----------------------------------------------------------
 
+  function desiredModel() {
+    if (forceHolistic) return "holistic";
+    try {
+      if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" &&
+          SB.DataCapture.isRecording()) {
+        return "holistic";
+      }
+    } catch (e) {}
+    return "hands";
+  }
+
+  function applyInferCap() {
+    INFER_MAX_W = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
+  }
+
   function loadLandmarker() {
-    console.log("Loading MediaPipe HolisticLandmarker…");
+    modelKind = desiredModel();
+    console.log("Loading MediaPipe " + (modelKind === "holistic" ? "Holistic" : "Hand") + "Landmarker…");
     preferGpu = !forceCpu;
+    applyInferCap();
     return initWorker()
       .catch(function (err) {
         console.warn(
@@ -235,13 +266,15 @@ SB.LiveEngine = function () {
           workerReady = true;
           var del = (msg.info && msg.info.delegate) || (preferGpu ? "GPU" : "CPU");
           preferGpu = del === "GPU";
-          INFER_MAX_W = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
-          stats.backend = "worker/" + del;
+          if (msg.info && msg.info.model) modelKind = msg.info.model;
+          applyInferCap();
+          stats.model = modelKind;
+          stats.backend = "worker/" + del + "/" + modelKind;
           worker.onmessage = onWorkerMessage;
           if (msg.info && msg.info.fallback) {
-            console.warn("Holistic GPU delegate failed, using CPU:", msg.info.fallback);
+            console.warn("GPU delegate failed, using CPU:", msg.info.fallback);
           }
-          console.log("MediaPipe HolisticLandmarker ready (" + stats.backend + ").");
+          console.log("MediaPipe ready (" + stats.backend + ").");
           resolve();
           return;
         }
@@ -260,7 +293,11 @@ SB.LiveEngine = function () {
         reject(err && err.message ? err : new Error("Worker error"));
       };
 
-      worker.postMessage({ type: "init", preferGpu: preferGpu });
+      worker.postMessage({
+        type: "init",
+        preferGpu: preferGpu,
+        model: modelKind,
+      });
     });
   }
 
@@ -268,13 +305,13 @@ SB.LiveEngine = function () {
     if (gpuFallbackTried || forceCpu) return;
     gpuFallbackTried = true;
     preferGpu = false;
-    INFER_MAX_W = INFER_MAX_W_CPU;
+    applyInferCap();
     workerReady = false;
     useWorker = false;
     console.warn(
-      "Holistic GPU detect stalled (" + reason + ") — replacing worker with CPU."
+      "GPU detect stalled (" + reason + ") — replacing worker with CPU (" + modelKind + ")."
     );
-    stats.backend = "worker/CPU(fallback…)";
+    stats.backend = "worker/CPU/" + modelKind + "(fallback…)";
     /* A hung detectForVideo blocks the classic worker event loop, so
        postMessage(reinit) never runs. Terminate and spawn a fresh worker. */
     if (worker) {
@@ -283,7 +320,7 @@ SB.LiveEngine = function () {
     }
     initWorker()
       .then(function () {
-        stats.backend = "worker/CPU(fallback)";
+        stats.backend = "worker/CPU/" + modelKind + "(fallback)";
         inferenceBusy = false;
         clearInferWatchdog();
         console.log("CPU worker ready after GPU stall.");
@@ -298,17 +335,25 @@ SB.LiveEngine = function () {
       });
   }
 
+  function tunePredictFromE2e(e2eMs) {
+    /* Aggressive lead: ~90% of measured e2e, capped for overshoot control */
+    predictSec = Math.min(0.12, Math.max(0.035, e2eMs / 1000 * 0.9));
+  }
+
   function onWorkerMessage(ev) {
     var msg = ev.data || {};
     if (msg.type === "ready" && msg.reinit) {
       workerReady = true;
       var del = (msg.info && msg.info.delegate) || "CPU";
       preferGpu = del === "GPU";
-      INFER_MAX_W = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
-      stats.backend = "worker/" + del + (gpuFallbackTried ? "(fallback)" : "");
+      if (msg.info && msg.info.model) modelKind = msg.info.model;
+      applyInferCap();
+      stats.model = modelKind;
+      stats.backend = "worker/" + del + "/" + modelKind +
+        (gpuFallbackTried ? "(fallback)" : "");
       inferenceBusy = false;
       clearInferWatchdog();
-      console.log("Holistic reinit ready (" + stats.backend + ").");
+      console.log("Worker reinit ready (" + stats.backend + ").");
       return;
     }
     if (msg.type === "result") {
@@ -323,8 +368,7 @@ SB.LiveEngine = function () {
         stats.e2eMs = Math.max(0, now - msg.wallSentMs);
         ringPush(e2eLatRing, _e2eIdx, stats.e2eMs);
         e2eLatN = _e2eIdx.i;
-        /* Lead the overlay by a fraction of measured e2e latency */
-        predictSec = Math.min(0.08, Math.max(0.028, stats.e2eMs / 1000 * 0.55));
+        tunePredictFromE2e(stats.e2eMs);
       }
       if (!gpuProbeDone) gpuProbeDone = true;
       try {
@@ -358,40 +402,82 @@ SB.LiveEngine = function () {
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm"
     ).then(async function (visionModule) {
       var FilesetResolver = visionModule.FilesetResolver;
+      var HandLandmarker = visionModule.HandLandmarker;
       var HolisticLandmarker = visionModule.HolisticLandmarker;
 
       var vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
       );
 
-      var opts = {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/" +
-            "holistic_landmarker/holistic_landmarker/float16/1/" +
-            "holistic_landmarker.task",
-          delegate: forceCpu ? "CPU" : "GPU",
-        },
-        runningMode: "VIDEO",
-        outputFaceBlendshapes: false,
-        outputPoseSegmentationMasks: false,
-      };
+      var useH = modelKind === "holistic";
+      var opts = useH
+        ? {
+            baseOptions: {
+              modelAssetPath:
+                "https://storage.googleapis.com/mediapipe-models/" +
+                "holistic_landmarker/holistic_landmarker/float16/1/" +
+                "holistic_landmarker.task",
+              delegate: forceCpu ? "CPU" : "GPU",
+            },
+            runningMode: "VIDEO",
+            outputFaceBlendshapes: false,
+            outputPoseSegmentationMasks: false,
+          }
+        : {
+            baseOptions: {
+              modelAssetPath:
+                "https://storage.googleapis.com/mediapipe-models/" +
+                "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+              delegate: forceCpu ? "CPU" : "GPU",
+            },
+            runningMode: "VIDEO",
+            numHands: 2,
+            minHandDetectionConfidence: 0.45,
+            minHandPresenceConfidence: 0.45,
+            minTrackingConfidence: 0.45,
+          };
 
+      var Factory = useH ? HolisticLandmarker : HandLandmarker;
       try {
-        landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
+        landmarker = await Factory.createFromOptions(vision, opts);
         preferGpu = opts.baseOptions.delegate === "GPU";
-        stats.backend = "main/" + opts.baseOptions.delegate;
+        stats.backend = "main/" + opts.baseOptions.delegate + "/" + modelKind;
       } catch (gpuErr) {
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
         opts.baseOptions.delegate = "CPU";
-        landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
+        landmarker = await Factory.createFromOptions(vision, opts);
         preferGpu = false;
-        stats.backend = "main/CPU";
+        stats.backend = "main/CPU/" + modelKind;
       }
-      INFER_MAX_W = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
-
-      console.log("MediaPipe HolisticLandmarker ready (" + stats.backend + ").");
+      applyInferCap();
+      stats.model = modelKind;
+      console.log("MediaPipe ready (" + stats.backend + ").");
     });
+  }
+
+  function normalizeMainResults(results) {
+    if (modelKind === "holistic") return results;
+    /* HandLandmarker → left/right groups */
+    var left = [];
+    var right = [];
+    var lms = results.landmarks || [];
+    var handed = results.handedness || results.handednesses || [];
+    for (var i = 0; i < lms.length; i++) {
+      var label = "";
+      var h = handed[i];
+      if (h && h.length && h[0]) {
+        label = String(h[0].categoryName || h[0].displayName || "").toLowerCase();
+      }
+      if (label.indexOf("left") >= 0) left.push(lms[i]);
+      else if (label.indexOf("right") >= 0) right.push(lms[i]);
+      else if (!right.length) right.push(lms[i]);
+      else left.push(lms[i]);
+    }
+    return {
+      leftHandLandmarks: left,
+      rightHandLandmarks: right,
+      poseLandmarks: [],
+    };
   }
 
   function ensureInferCanvas(srcW, srcH) {
@@ -513,8 +599,8 @@ SB.LiveEngine = function () {
       .then(function () {
         return navigator.mediaDevices.getUserMedia({
           video: {
-            width: { ideal: 960, max: 1280 },
-            height: { ideal: 540, max: 720 },
+            width: { ideal: 640, max: 1280 },
+            height: { ideal: 360, max: 720 },
             frameRate: { ideal: 30, max: 30 },
           },
           audio: false,
@@ -541,7 +627,9 @@ SB.LiveEngine = function () {
         lastStatsTick = performance.now();
         startInferenceLoop();
         startRenderLoop();
-        console.log("Live engine started (HolisticLandmarker, latest-frame pipeline).");
+        console.log(
+          "Live engine started (" + modelKind + ", latest-frame, decoupled draw)."
+        );
         return self;
       })
       .catch(function (err) {
@@ -709,89 +797,82 @@ SB.LiveEngine = function () {
     if (ts <= lastMediaTimestampMs) ts = lastMediaTimestampMs + 1;
     lastMediaTimestampMs = ts;
 
-    var bitmapPromise;
-    if (typeof createImageBitmap === "function") {
-      bitmapPromise = Promise.race([
-        createImageBitmap(videoEl, {
-          resizeWidth: targetW,
-          resizeHeight: targetH,
-          resizeQuality: "low",
-        }),
-        new Promise(function (_, reject) {
-          setTimeout(function () { reject(new Error("createImageBitmap timeout")); }, 400);
-        }),
-      ]).catch(function () {
-        /* Canvas draw fallback — never stall the busy gate on bitmap hangs. */
-        inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
-        return canvas;
-      });
-    } else {
-      inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
-      bitmapPromise = Promise.resolve(canvas);
-    }
+    /* Downscale on main via drawImage (cheap), then transfer a same-size
+       bitmap — avoids resize inside createImageBitmap which was costly. */
+    inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
 
-    bitmapPromise
-      .then(function (input) {
-        if (!running) {
-          if (input && input.close) input.close();
-          clearInferWatchdog();
-          inferenceBusy = false;
-          return;
-        }
-
-        if (useWorker && workerReady && worker && input && input.close) {
-          /* Transfer bitmap to worker — UI thread stays free for rAF overlay. */
-          detectId += 1;
-          worker.postMessage(
-            {
-              type: "detect",
-              id: detectId,
-              bitmap: input,
-              timestamp: ts,
-              wallSentMs: t0,
-            },
-            [input]
-          );
-          return;
-        }
-
-        /* Worker mid-reinit: drop this frame cleanly */
-        if (useWorker && !workerReady) {
-          if (input && input.close) input.close();
-          clearInferWatchdog();
-          inferenceBusy = false;
-          stats.dropped++;
-          return;
-        }
-
-        if (!landmarker) {
-          if (input && input.close) input.close();
-          clearInferWatchdog();
-          inferenceBusy = false;
-          return;
-        }
-
-        var results = landmarker.detectForVideo(input, ts);
+    var sendInput = function (input) {
+      if (!running) {
         if (input && input.close) input.close();
-        var t1 = performance.now();
-        stats.inferMs = t1 - t0;
-        stats.e2eMs = stats.inferMs;
-        lastInferEndMs = t1;
-        inferFrameCount++;
-        ringPush(inferLatRing, _inferIdx, stats.inferMs);
-        inferLatN = _inferIdx.i;
-        ringPush(e2eLatRing, _e2eIdx, stats.e2eMs);
-        e2eLatN = _e2eIdx.i;
-        if (!gpuProbeDone) gpuProbeDone = true;
-        ingestResults(results, lastInferEndMs, ts);
         clearInferWatchdog();
         inferenceBusy = false;
-      })
-      .catch(function (err) {
-        console.error("MediaPipe detection error:", err);
+        return;
+      }
+
+      if (useWorker && workerReady && worker && input && input.close) {
+        detectId += 1;
+        worker.postMessage(
+          {
+            type: "detect",
+            id: detectId,
+            bitmap: input,
+            timestamp: ts,
+            wallSentMs: t0,
+          },
+          [input]
+        );
+        return;
+      }
+
+      if (useWorker && !workerReady) {
+        if (input && input.close) input.close();
         clearInferWatchdog();
         inferenceBusy = false;
-      });
+        stats.dropped++;
+        return;
+      }
+
+      if (!landmarker) {
+        if (input && input.close) input.close();
+        clearInferWatchdog();
+        inferenceBusy = false;
+        return;
+      }
+
+      var raw = landmarker.detectForVideo(input || canvas, ts);
+      if (input && input.close) input.close();
+      var results = normalizeMainResults(raw);
+      var t1 = performance.now();
+      stats.inferMs = t1 - t0;
+      stats.e2eMs = stats.inferMs;
+      lastInferEndMs = t1;
+      inferFrameCount++;
+      ringPush(inferLatRing, _inferIdx, stats.inferMs);
+      inferLatN = _inferIdx.i;
+      ringPush(e2eLatRing, _e2eIdx, stats.e2eMs);
+      e2eLatN = _e2eIdx.i;
+      tunePredictFromE2e(stats.e2eMs);
+      if (!gpuProbeDone) gpuProbeDone = true;
+      ingestResults(results, lastInferEndMs, ts);
+      clearInferWatchdog();
+      inferenceBusy = false;
+    };
+
+    if (typeof createImageBitmap === "function" && useWorker) {
+      createImageBitmap(canvas)
+        .then(sendInput)
+        .catch(function () {
+          /* Last resort: main-thread detect on the canvas (blocks briefly). */
+          if (landmarker) sendInput(null);
+          else {
+            clearInferWatchdog();
+            inferenceBusy = false;
+            stats.dropped++;
+          }
+        });
+    } else {
+      sendInput(null);
+    }
   }
 
   // ----------------------------------------------------------
@@ -799,9 +880,7 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
 
   function ingestResults(results, wallMs, mediaMs) {
-    /* Holistic already labels hands anatomically, exactly as dev/stan
-       consumed them. No handedness guessing or swap repair here: the
-       LSTM training frames came straight from these two arrays. */
+    /* Hands path labels via HandLandmarker handedness; Holistic is anatomical. */
     leftCloneFlip = !leftCloneFlip;
     rightCloneFlip = !rightCloneFlip;
     var left = firstGroup(
@@ -826,8 +905,13 @@ SB.LiveEngine = function () {
     stats.hands = handCount;
     if (SB.Engine && SB.Engine._hands) SB.Engine._hands(handCount);
 
-    /* Recognition uses measured landmarks only — never predicted UI coords */
-    if (classifier) {
+    /* Always refresh overlay filters — never wait on classify/LSTM */
+    updateUiFromRaw(wallMs);
+
+    heavyFrame++;
+    var runHeavy = (heavyFrame & 1) === 0; /* every other infer frame */
+
+    if (runHeavy && classifier) {
       var classifierHand = right || left;
       if (classifierHand) {
         var features = landmarkVector(classifierHand);
@@ -842,10 +926,8 @@ SB.LiveEngine = function () {
       }
     }
 
-    /* Update UI buffers immediately after measure (render loop will paint) */
-    updateUiFromRaw(wallMs);
+    if (!runHeavy) return;
 
-    /* Defer secondary consumers so overlay paint isn't blocked */
     var snapResults = results;
     var snapLeft = left;
     var snapRight = right;
@@ -927,20 +1009,23 @@ SB.LiveEngine = function () {
     }
   }
 
-  function predictHand(filtered, raw, prev, dtSec, outBuf) {
+  function predictHand(filtered, raw, prev, dtSec, leadSec, outBuf) {
     if (!filtered) return null;
-    if (!raw || !prev || dtSec <= 1e-4) return filtered;
+    if (!raw || !prev || dtSec <= 1e-4 || leadSec <= 0) return filtered;
     var out = outBuf || [];
-    var lead = predictSec;
+    var tipBoost = 1.15; /* fingertips lead a bit more than palm */
     for (var i = 0; i < filtered.length; i++) {
       if (!out[i]) out[i] = { x: 0, y: 0, z: 0 };
       var vx = (raw[i].x - prev[i].x) / dtSec;
       var vy = (raw[i].y - prev[i].y) / dtSec;
+      var lead = leadSec;
+      if (SB._TIP_IDX && SB._TIP_IDX[i]) lead *= tipBoost;
       var dx = vx * lead;
       var dy = vy * lead;
       var mag = Math.sqrt(dx * dx + dy * dy);
-      if (mag > maxPredictNorm) {
-        var s = maxPredictNorm / mag;
+      var cap = maxPredictNorm * (SB._TIP_IDX && SB._TIP_IDX[i] ? 1.25 : 1);
+      if (mag > cap) {
+        var s = cap / mag;
         dx *= s;
         dy *= s;
       }
@@ -960,20 +1045,30 @@ SB.LiveEngine = function () {
       return;
     }
     syncCanvasSize();
-    if (!overlayCtx) overlayCtx = canvasEl.getContext("2d");
+    if (!overlayCtx) overlayCtx = canvasEl.getContext("2d", { alpha: true });
     var ctx = overlayCtx;
     ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
 
     var age = rawHands.tMs ? Math.max(0, now - rawHands.tMs) : 0;
     stats.frameAgeMs = age;
 
+    /*
+     * Glued feel: extrapolate by (frame age → bring to "now") plus a slice
+     * of measured e2e so we stay ahead of the next delayed measurement.
+     */
+    paintLeadSec = Math.min(
+      0.13,
+      Math.max(predictSec, age / 1000 + predictSec * 0.35)
+    );
+
     var dtSec = prevRaw.tMs ? (rawHands.tMs - prevRaw.tMs) / 1000 : 0;
+    if (dtSec < 1e-4 && age > 0) dtSec = Math.max(0.016, age / 1000);
 
     var leftDraw = predictHand(
-      uiHands.left, rawHands.left, prevRaw.left, dtSec, leftPredBuf
+      uiHands.left, rawHands.left, prevRaw.left, dtSec, paintLeadSec, leftPredBuf
     );
     var rightDraw = predictHand(
-      uiHands.right, rawHands.right, prevRaw.right, dtSec, rightPredBuf
+      uiHands.right, rawHands.right, prevRaw.right, dtSec, paintLeadSec, rightPredBuf
     );
 
     if (leftDraw) drawHand(ctx, leftDraw, "L");
@@ -1060,6 +1155,26 @@ SB.LiveEngine = function () {
   // HUD
   // ----------------------------------------------------------
 
+  function adaptInferResolution() {
+    var base = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
+    var next = base;
+    if (
+      (stats.inferFps > 0 && stats.inferFps < TARGET_INFER_FPS) ||
+      (stats.e2eMsAvg > 0 && stats.e2eMsAvg > TARGET_E2E_MS)
+    ) {
+      next = INFER_MAX_W_LOW;
+    } else if (
+      stats.inferFps >= TARGET_INFER_FPS + 4 &&
+      stats.e2eMsAvg > 0 &&
+      stats.e2eMsAvg < TARGET_E2E_MS * 0.75
+    ) {
+      next = base;
+    }
+    if (next !== INFER_MAX_W) {
+      INFER_MAX_W = next;
+    }
+  }
+
   function updateHud(now) {
     var statsTick = false;
     if (now - lastStatsTick >= 500) {
@@ -1080,6 +1195,8 @@ SB.LiveEngine = function () {
       stats.e2eMsAvg = e2e.avg;
       stats.e2eMsP95 = e2e.p95;
       stats.confirmMsAvg = conf.avg;
+      stats.model = modelKind;
+      adaptInferResolution();
     }
 
     var el = document.getElementById("trackHud");
@@ -1103,6 +1220,7 @@ SB.LiveEngine = function () {
       " (" + stats.inferMs.toFixed(0) + "ms avg " + stats.inferMsAvg.toFixed(0) +
       " p95 " + stats.inferMsP95.toFixed(0) + ")" +
       " · E2E " + stats.e2eMsAvg.toFixed(0) + "/" + stats.e2eMsP95.toFixed(0) + "ms" +
+      " · Lead " + (paintLeadSec * 1000).toFixed(0) + "ms" +
       " · Draw " + stats.renderFps.toFixed(0) +
       " · Age " + stats.frameAgeMs.toFixed(0) + "ms" +
       " · Drop " + stats.dropped +
