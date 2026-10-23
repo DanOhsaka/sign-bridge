@@ -6,18 +6,19 @@
      Camera (display) ──────────────► <video>
            │
            ▼ (downscale branch)
-     Inference canvas ≤640px
+     Inference canvas ≤720px (640 on CPU)
            │
-           ▼ requestVideoFrameCallback + busy gate
-     HolisticLandmarker in Web Worker (same model as dev/stan)
+           ▼ requestVideoFrameCallback + busy gate + watchdog
+     HolisticLandmarker in Web Worker (GPU with CPU fallback)
            │
            ├── left/right hand landmarks ──► classifier / recognition
            ├── pose landmarks ──► LSTM frame normalizer
            │
-           └── UI buffer ──► One Euro + short prediction
+           └── UI buffer ──► adaptive One Euro + short prediction
                               └── requestAnimationFrame overlay
 
    Never queue inference. If the model is busy, drop the frame.
+   Dev HUD: ?perf=1 or ?debugTrack=1 (or settings.perfHud).
    ============================================================ */
 
 
@@ -39,14 +40,19 @@ SB.LiveEngine = function () {
   var useWorker = false;
   var detectId = 0;
   var stream = null;
+  var preferGpu = true;
+  var forceCpu = false;
 
   var videoEl = null;
   var canvasEl = null;
+  var overlayCtx = null;
   var inferCanvas = null;
   var inferCtx = null;
 
   var running = false;
   var inferenceBusy = false;
+  var busySinceMs = 0;
+  var inferWatchdog = null;
   var rvfcHandle = null;
   var renderRaf = null;
   var useRvfc = typeof HTMLVideoElement !== "undefined" &&
@@ -54,20 +60,32 @@ SB.LiveEngine = function () {
 
   var mirror = true;
   var drawLandmarksEnabled = true;
-  /* Dev overlay (Cam/Infer/Age…) — off by default; enable with ?debugTrack=1 */
+  /* Dev overlay — off by default; ?perf=1 | ?debugTrack=1 | settings.perfHud */
   var showHud = false;
   try {
-    showHud = !!(typeof location !== "undefined" &&
-      /(?:^|[?&])debugTrack=1(?:&|$)/.test(location.search || ""));
+    var q = (typeof location !== "undefined" && location.search) || "";
+    showHud = /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(q);
+    forceCpu = /(?:^|[?&])forceCpu=1(?:&|$)/.test(q);
+    if (!showHud && typeof SB !== "undefined" && SB.settings && SB.settings.perfHud) {
+      showHud = true;
+    }
   } catch (e) {}
 
   /* Latest measured hands (recognition) + UI hands (filtered/predicted) */
   var rawHands = { left: null, right: null, tMs: 0, mediaMs: 0 };
   var uiHands = { left: null, right: null };
   var prevRaw = { left: null, right: null, tMs: 0 };
+  /* Double-buffered clones so prevRaw never aliases the live buffer. */
+  var leftCloneA = [];
+  var leftCloneB = [];
+  var rightCloneA = [];
+  var rightCloneB = [];
+  var leftCloneFlip = false;
+  var rightCloneFlip = false;
 
-  var leftFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
-  var rightFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
+  /* Snappier defaults; HandLandmarkFilter adapts beta on fast motion */
+  var leftFilter = new SB.HandLandmarkFilter({ minCutoff: 1.85, beta: 1.05 });
+  var rightFilter = new SB.HandLandmarkFilter({ minCutoff: 1.85, beta: 1.05 });
   var leftUiBuf = [];
   var rightUiBuf = [];
   var leftPredBuf = [];
@@ -75,23 +93,50 @@ SB.LiveEngine = function () {
   var drawPtsBuf = [];
 
   /* Latency compensation for overlay only (seconds of extrapolation). */
-  var predictSec = 0.035;
-  var maxPredictNorm = 0.08;
+  var predictSec = 0.04;
+  var maxPredictNorm = 0.1;
 
-  /* dev/stan ran Holistic on the full camera frame. The LSTM was trained on
-     those landmarks, so inference is not downscaled below the 1280px camera. */
-  var INFER_MAX_W = 1280;
+  /*
+   * Holistic at 1280px saturates CPU/GPU and inflates age.
+   * Landmarks are normalized by shoulder width for LSTM, so 720 is the
+   * responsiveness default; CPU fallback uses 640.
+   */
+  var INFER_MAX_W_GPU = 720;
+  var INFER_MAX_W_CPU = 640;
+  var INFER_MAX_W = INFER_MAX_W_GPU;
+
+  /* Busy-gate watchdog — GPU can hang on some headless/SwiftShader hosts. */
+  var INFER_WATCHDOG_MS = 900;
+  var GPU_PROBE_MS = 2500;
+  var gpuProbeDone = false;
+  var gpuFallbackTried = false;
 
   /* Perf / HUD */
+  var LAT_RING = 48;
+  var inferLatRing = new Float64Array(LAT_RING);
+  var e2eLatRing = new Float64Array(LAT_RING);
+  var confirmLatRing = new Float64Array(LAT_RING);
+  var inferLatN = 0;
+  var e2eLatN = 0;
+  var confirmLatN = 0;
   var stats = {
     camFps: 0,
     inferFps: 0,
     renderFps: 0,
     inferMs: 0,
+    inferMsAvg: 0,
+    inferMsP95: 0,
     frameAgeMs: 0,
+    e2eMs: 0,
+    e2eMsAvg: 0,
+    e2eMsP95: 0,
+    confirmMsAvg: 0,
     dropped: 0,
+    timeouts: 0,
     hands: 0,
     backend: "—",
+    inferW: 0,
+    inferH: 0,
   };
   var camFrameCount = 0;
   var inferFrameCount = 0;
@@ -109,12 +154,37 @@ SB.LiveEngine = function () {
     [0, 17],
   ];
 
+  function ringPush(ring, nRef, value) {
+    ring[nRef.i % LAT_RING] = value;
+    nRef.i++;
+  }
+  var _inferIdx = { i: 0 };
+  var _e2eIdx = { i: 0 };
+  var _confirmIdx = { i: 0 };
+
+  function ringStats(ring, n) {
+    var count = Math.min(n, LAT_RING);
+    if (!count) return { avg: 0, p95: 0 };
+    var tmp = [];
+    var sum = 0;
+    var start = n > LAT_RING ? n % LAT_RING : 0;
+    for (var i = 0; i < count; i++) {
+      var v = ring[(start + i) % LAT_RING];
+      tmp.push(v);
+      sum += v;
+    }
+    tmp.sort(function (a, b) { return a - b; });
+    var p95 = tmp[Math.min(tmp.length - 1, Math.floor(0.95 * (tmp.length - 1)))];
+    return { avg: sum / count, p95: p95 };
+  }
+
   // ----------------------------------------------------------
   // Load HolisticLandmarker — prefer Web Worker, fall back to main
   // ----------------------------------------------------------
 
   function loadLandmarker() {
     console.log("Loading MediaPipe HolisticLandmarker…");
+    preferGpu = !forceCpu;
     return initWorker()
       .catch(function (err) {
         console.warn(
@@ -156,12 +226,17 @@ SB.LiveEngine = function () {
       worker.onmessage = function (ev) {
         var msg = ev.data || {};
         if (msg.type === "ready") {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
+          if (settled && !msg.reinit) return;
+          if (!settled) {
+            settled = true;
+            clearTimeout(timer);
+          }
           useWorker = true;
           workerReady = true;
-          stats.backend = "worker/" + ((msg.info && msg.info.delegate) || "GPU");
+          var del = (msg.info && msg.info.delegate) || (preferGpu ? "GPU" : "CPU");
+          preferGpu = del === "GPU";
+          INFER_MAX_W = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
+          stats.backend = "worker/" + del;
           worker.onmessage = onWorkerMessage;
           if (msg.info && msg.info.fallback) {
             console.warn("Holistic GPU delegate failed, using CPU:", msg.info.fallback);
@@ -185,16 +260,73 @@ SB.LiveEngine = function () {
         reject(err && err.message ? err : new Error("Worker error"));
       };
 
-      worker.postMessage({ type: "init", preferGpu: true });
+      worker.postMessage({ type: "init", preferGpu: preferGpu });
     });
+  }
+
+  function fallbackWorkerToCpu(reason) {
+    if (gpuFallbackTried || forceCpu) return;
+    gpuFallbackTried = true;
+    preferGpu = false;
+    INFER_MAX_W = INFER_MAX_W_CPU;
+    workerReady = false;
+    useWorker = false;
+    console.warn(
+      "Holistic GPU detect stalled (" + reason + ") — replacing worker with CPU."
+    );
+    stats.backend = "worker/CPU(fallback…)";
+    /* A hung detectForVideo blocks the classic worker event loop, so
+       postMessage(reinit) never runs. Terminate and spawn a fresh worker. */
+    if (worker) {
+      try { worker.terminate(); } catch (e) {}
+      worker = null;
+    }
+    initWorker()
+      .then(function () {
+        stats.backend = "worker/CPU(fallback)";
+        inferenceBusy = false;
+        clearInferWatchdog();
+        console.log("CPU worker ready after GPU stall.");
+      })
+      .catch(function (err) {
+        console.error("CPU worker fallback failed:", err);
+        return initMainThreadLandmarker().then(function () {
+          useWorker = false;
+          inferenceBusy = false;
+          clearInferWatchdog();
+        });
+      });
   }
 
   function onWorkerMessage(ev) {
     var msg = ev.data || {};
+    if (msg.type === "ready" && msg.reinit) {
+      workerReady = true;
+      var del = (msg.info && msg.info.delegate) || "CPU";
+      preferGpu = del === "GPU";
+      INFER_MAX_W = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
+      stats.backend = "worker/" + del + (gpuFallbackTried ? "(fallback)" : "");
+      inferenceBusy = false;
+      clearInferWatchdog();
+      console.log("Holistic reinit ready (" + stats.backend + ").");
+      return;
+    }
     if (msg.type === "result") {
+      clearInferWatchdog();
+      var now = performance.now();
       stats.inferMs = msg.inferMs || 0;
-      lastInferEndMs = performance.now();
+      lastInferEndMs = now;
       inferFrameCount++;
+      ringPush(inferLatRing, _inferIdx, stats.inferMs);
+      inferLatN = _inferIdx.i;
+      if (msg.wallSentMs != null) {
+        stats.e2eMs = Math.max(0, now - msg.wallSentMs);
+        ringPush(e2eLatRing, _e2eIdx, stats.e2eMs);
+        e2eLatN = _e2eIdx.i;
+        /* Lead the overlay by a fraction of measured e2e latency */
+        predictSec = Math.min(0.08, Math.max(0.028, stats.e2eMs / 1000 * 0.55));
+      }
+      if (!gpuProbeDone) gpuProbeDone = true;
       try {
         ingestResults(
           {
@@ -216,6 +348,7 @@ SB.LiveEngine = function () {
     }
     if (msg.type === "error") {
       console.error("Hand worker detect error:", msg.error);
+      clearInferWatchdog();
       inferenceBusy = false;
     }
   }
@@ -237,20 +370,25 @@ SB.LiveEngine = function () {
             "https://storage.googleapis.com/mediapipe-models/" +
             "holistic_landmarker/holistic_landmarker/float16/1/" +
             "holistic_landmarker.task",
-          delegate: "GPU",
+          delegate: forceCpu ? "CPU" : "GPU",
         },
         runningMode: "VIDEO",
+        outputFaceBlendshapes: false,
+        outputPoseSegmentationMasks: false,
       };
 
       try {
         landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
-        stats.backend = "main/GPU";
+        preferGpu = opts.baseOptions.delegate === "GPU";
+        stats.backend = "main/" + opts.baseOptions.delegate;
       } catch (gpuErr) {
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
         opts.baseOptions.delegate = "CPU";
         landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
+        preferGpu = false;
         stats.backend = "main/CPU";
       }
+      INFER_MAX_W = preferGpu ? INFER_MAX_W_GPU : INFER_MAX_W_CPU;
 
       console.log("MediaPipe HolisticLandmarker ready (" + stats.backend + ").");
     });
@@ -271,6 +409,8 @@ SB.LiveEngine = function () {
       inferCanvas.width = w;
       inferCanvas.height = h;
     }
+    stats.inferW = w;
+    stats.inferH = h;
     return inferCanvas;
   }
 
@@ -306,11 +446,33 @@ SB.LiveEngine = function () {
   self.setShowHud = function (on) {
     showHud = !!on;
     var el = document.getElementById("trackHud");
-    if (el && !showHud) el.hidden = true;
+    if (el && !showHud) {
+      el.hidden = true;
+      el.setAttribute("aria-hidden", "true");
+    }
+  };
+
+  self.getShowHud = function () {
+    return showHud;
   };
 
   self.getPerfStats = function () {
+    var inf = ringStats(inferLatRing, inferLatN);
+    var e2e = ringStats(e2eLatRing, e2eLatN);
+    var conf = ringStats(confirmLatRing, confirmLatN);
+    stats.inferMsAvg = inf.avg;
+    stats.inferMsP95 = inf.p95;
+    stats.e2eMsAvg = e2e.avg;
+    stats.e2eMsP95 = e2e.p95;
+    stats.confirmMsAvg = conf.avg;
     return Object.assign({}, stats);
+  };
+
+  /** Called by translate view when a token is confirmed into the transcript. */
+  self.noteConfirmMs = function (ms) {
+    if (typeof ms !== "number" || !(ms >= 0)) return;
+    ringPush(confirmLatRing, _confirmIdx, ms);
+    confirmLatN = _confirmIdx.i;
   };
 
   // ----------------------------------------------------------
@@ -328,9 +490,11 @@ SB.LiveEngine = function () {
     state = "starting";
     videoEl = opts.videoEl;
     canvasEl = opts.canvasEl;
+    overlayCtx = null;
     mirror = opts.mirror !== false;
     drawLandmarksEnabled = opts.drawLandmarks !== false;
     if (opts.showHud != null) showHud = !!opts.showHud;
+    else if (SB.settings && SB.settings.perfHud) showHud = true;
 
     if (!videoEl || !canvasEl) {
 
@@ -349,9 +513,9 @@ SB.LiveEngine = function () {
       .then(function () {
         return navigator.mediaDevices.getUserMedia({
           video: {
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            frameRate: { ideal: 30, max: 60 },
+            width: { ideal: 960, max: 1280 },
+            height: { ideal: 540, max: 720 },
+            frameRate: { ideal: 30, max: 30 },
           },
           audio: false,
         });
@@ -392,6 +556,7 @@ SB.LiveEngine = function () {
   self.stop = function () {
     running = false;
     inferenceBusy = false;
+    clearInferWatchdog();
     stopInferenceLoop();
     stopRenderLoop();
     teardownStream();
@@ -420,6 +585,10 @@ SB.LiveEngine = function () {
     leftFilter.reset();
     rightFilter.reset();
     stats.dropped = 0;
+    stats.timeouts = 0;
+    inferLatN = e2eLatN = confirmLatN = 0;
+    _inferIdx.i = _e2eIdx.i = _confirmIdx.i = 0;
+    gpuProbeDone = false;
   }
 
   // ----------------------------------------------------------
@@ -445,6 +614,7 @@ SB.LiveEngine = function () {
   function renderKickInfer() {
     if (!running) return;
     if (!inferenceBusy) runInference(performance.now(), null);
+    else maybeWatchdog(performance.now());
     requestAnimationFrame(renderKickInfer);
   }
 
@@ -455,6 +625,7 @@ SB.LiveEngine = function () {
     if (inferenceBusy) {
       /* Model still working — discard this camera frame. Freshness > completeness. */
       stats.dropped++;
+      maybeWatchdog(now);
     } else {
       var mediaMs = metadata && metadata.mediaTime != null
         ? metadata.mediaTime * 1000
@@ -466,6 +637,52 @@ SB.LiveEngine = function () {
 
     if (running && useRvfc) {
       rvfcHandle = videoEl.requestVideoFrameCallback(onVideoFrame);
+    }
+  }
+
+  function clearInferWatchdog() {
+    if (inferWatchdog != null) {
+      clearTimeout(inferWatchdog);
+      inferWatchdog = null;
+    }
+  }
+
+  function watchdogLimitMs() {
+    /* First GPU frame: fail fast to CPU. First CPU frame after cold start can be slow. */
+    if (preferGpu && !gpuProbeDone && !gpuFallbackTried) return GPU_PROBE_MS;
+    if (inferLatN === 0) return 3500;
+    return INFER_WATCHDOG_MS;
+  }
+
+  function armInferWatchdog(wallSentMs) {
+    clearInferWatchdog();
+    var limit = watchdogLimitMs();
+    busySinceMs = wallSentMs;
+    inferWatchdog = setTimeout(function () {
+      if (!inferenceBusy || !running) return;
+      stats.timeouts++;
+      stats.dropped++;
+      inferenceBusy = false;
+      inferWatchdog = null;
+      if (preferGpu && !gpuFallbackTried) {
+        fallbackWorkerToCpu("watchdog " + limit + "ms");
+      } else {
+        console.warn("Inference watchdog fired after " + limit + "ms — releasing busy gate.");
+      }
+    }, limit);
+  }
+
+  function maybeWatchdog(now) {
+    if (!inferenceBusy) return;
+    var limit = watchdogLimitMs();
+    if (busySinceMs && now - busySinceMs > limit + 50) {
+      /* rAF path backup if timer was throttled */
+      clearInferWatchdog();
+      stats.timeouts++;
+      inferenceBusy = false;
+      if (preferGpu && !gpuFallbackTried) {
+        fallbackWorkerToCpu("busy age");
+      }
     }
   }
 
@@ -481,6 +698,7 @@ SB.LiveEngine = function () {
 
     inferenceBusy = true;
     var t0 = performance.now();
+    armInferWatchdog(t0);
     var srcW = videoEl.videoWidth;
     var srcH = videoEl.videoHeight;
     var canvas = ensureInferCanvas(srcW, srcH);
@@ -493,10 +711,19 @@ SB.LiveEngine = function () {
 
     var bitmapPromise;
     if (typeof createImageBitmap === "function") {
-      bitmapPromise = createImageBitmap(videoEl, {
-        resizeWidth: targetW,
-        resizeHeight: targetH,
-        resizeQuality: "low",
+      bitmapPromise = Promise.race([
+        createImageBitmap(videoEl, {
+          resizeWidth: targetW,
+          resizeHeight: targetH,
+          resizeQuality: "low",
+        }),
+        new Promise(function (_, reject) {
+          setTimeout(function () { reject(new Error("createImageBitmap timeout")); }, 400);
+        }),
+      ]).catch(function () {
+        /* Canvas draw fallback — never stall the busy gate on bitmap hangs. */
+        inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
+        return canvas;
       });
     } else {
       inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
@@ -507,6 +734,7 @@ SB.LiveEngine = function () {
       .then(function (input) {
         if (!running) {
           if (input && input.close) input.close();
+          clearInferWatchdog();
           inferenceBusy = false;
           return;
         }
@@ -527,22 +755,41 @@ SB.LiveEngine = function () {
           return;
         }
 
+        /* Worker mid-reinit: drop this frame cleanly */
+        if (useWorker && !workerReady) {
+          if (input && input.close) input.close();
+          clearInferWatchdog();
+          inferenceBusy = false;
+          stats.dropped++;
+          return;
+        }
+
         if (!landmarker) {
           if (input && input.close) input.close();
+          clearInferWatchdog();
           inferenceBusy = false;
           return;
         }
 
         var results = landmarker.detectForVideo(input, ts);
         if (input && input.close) input.close();
-        stats.inferMs = performance.now() - t0;
-        lastInferEndMs = performance.now();
+        var t1 = performance.now();
+        stats.inferMs = t1 - t0;
+        stats.e2eMs = stats.inferMs;
+        lastInferEndMs = t1;
         inferFrameCount++;
+        ringPush(inferLatRing, _inferIdx, stats.inferMs);
+        inferLatN = _inferIdx.i;
+        ringPush(e2eLatRing, _e2eIdx, stats.e2eMs);
+        e2eLatN = _e2eIdx.i;
+        if (!gpuProbeDone) gpuProbeDone = true;
         ingestResults(results, lastInferEndMs, ts);
+        clearInferWatchdog();
         inferenceBusy = false;
       })
       .catch(function (err) {
         console.error("MediaPipe detection error:", err);
+        clearInferWatchdog();
         inferenceBusy = false;
       });
   }
@@ -555,8 +802,16 @@ SB.LiveEngine = function () {
     /* Holistic already labels hands anatomically, exactly as dev/stan
        consumed them. No handedness guessing or swap repair here: the
        LSTM training frames came straight from these two arrays. */
-    var left = firstGroup(results.leftHandLandmarks);
-    var right = firstGroup(results.rightHandLandmarks);
+    leftCloneFlip = !leftCloneFlip;
+    rightCloneFlip = !rightCloneFlip;
+    var left = firstGroup(
+      results.leftHandLandmarks,
+      leftCloneFlip ? leftCloneA : leftCloneB
+    );
+    var right = firstGroup(
+      results.rightHandLandmarks,
+      rightCloneFlip ? rightCloneA : rightCloneB
+    );
 
     prevRaw.left = rawHands.left;
     prevRaw.right = rawHands.right;
@@ -589,38 +844,47 @@ SB.LiveEngine = function () {
 
     /* Update UI buffers immediately after measure (render loop will paint) */
     updateUiFromRaw(wallMs);
-    // Forward every detected frame to training and LSTM consumers,
-    // independently of the optional single-hand classifier.
-    if (window.TrainingRecorder &&
-        typeof window.TrainingRecorder.processFrame === "function") {
-      try {
-        window.TrainingRecorder.processFrame(results, left, right);
-      } catch (err) {
-        console.error("Training recorder error:", err);
-      }
-    }
 
-    if (window.SignBridgeLiveTest &&
-        typeof window.SignBridgeLiveTest.processFrame === "function") {
-      try {
-        window.SignBridgeLiveTest.processFrame(results, left, right);
-      } catch (err) {
-        console.error("LSTM live test error:", err);
+    /* Defer secondary consumers so overlay paint isn't blocked */
+    var snapResults = results;
+    var snapLeft = left;
+    var snapRight = right;
+    queueMicrotask(function () {
+      if (window.TrainingRecorder &&
+          typeof window.TrainingRecorder.processFrame === "function") {
+        try {
+          window.TrainingRecorder.processFrame(snapResults, snapLeft, snapRight);
+        } catch (err) {
+          console.error("Training recorder error:", err);
+        }
       }
-    }
+
+      if (window.SignBridgeLiveTest &&
+          typeof window.SignBridgeLiveTest.processFrame === "function") {
+        try {
+          window.SignBridgeLiveTest.processFrame(snapResults, snapLeft, snapRight);
+        } catch (err) {
+          console.error("LSTM live test error:", err);
+        }
+      }
+    });
   }
 
   /* Holistic returns each hand as an array of detections; take the first. */
-  function firstGroup(list) {
+  function firstGroup(list, buf) {
     if (!list || !list.length || !list[0] || !list[0].length) return null;
-    return cloneLandmarks(list[0]);
+    return cloneLandmarks(list[0], buf);
   }
 
-  function cloneLandmarks(src) {
-    var out = new Array(src.length);
+  function cloneLandmarks(src, buf) {
+    var out = buf || [];
     for (var i = 0; i < src.length; i++) {
-      out[i] = { x: src[i].x, y: src[i].y, z: src[i].z || 0 };
+      if (!out[i]) out[i] = { x: 0, y: 0, z: 0 };
+      out[i].x = src[i].x;
+      out[i].y = src[i].y;
+      out[i].z = src[i].z || 0;
     }
+    out.length = src.length;
     return out;
   }
 
@@ -629,13 +893,13 @@ SB.LiveEngine = function () {
     if (rawHands.left) {
       uiHands.left = leftFilter.apply(tSec, rawHands.left, leftUiBuf);
     } else {
-      leftFilter.reset();
+      leftFilter.noteMiss();
       uiHands.left = null;
     }
     if (rawHands.right) {
       uiHands.right = rightFilter.apply(tSec, rawHands.right, rightUiBuf);
     } else {
-      rightFilter.reset();
+      rightFilter.noteMiss();
       uiHands.right = null;
     }
   }
@@ -696,7 +960,8 @@ SB.LiveEngine = function () {
       return;
     }
     syncCanvasSize();
-    var ctx = canvasEl.getContext("2d");
+    if (!overlayCtx) overlayCtx = canvasEl.getContext("2d");
+    var ctx = overlayCtx;
     ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
 
     var age = rawHands.tMs ? Math.max(0, now - rawHands.tMs) : 0;
@@ -732,18 +997,17 @@ SB.LiveEngine = function () {
     ctx.lineWidth = 1.75;
     ctx.lineCap = "round";
     ctx.strokeStyle = "rgba(52, 224, 192, .42)";
-
+    ctx.beginPath();
     for (var c = 0; c < HAND_CONNECTIONS.length; c++) {
       var a = HAND_CONNECTIONS[c][0];
       var b = HAND_CONNECTIONS[c][1];
       var p0 = drawPtsBuf[a];
       var p1 = drawPtsBuf[b];
       if (!p0 || !p1) continue;
-      ctx.beginPath();
       ctx.moveTo(p0.x, p0.y);
       ctx.lineTo(p1.x, p1.y);
-      ctx.stroke();
     }
+    ctx.stroke();
 
     for (var j = 0; j < n; j++) {
       var pt = drawPtsBuf[j];
@@ -757,7 +1021,7 @@ SB.LiveEngine = function () {
     if (label && landmarks[0]) {
       var wx = drawPtsBuf[0].x;
       var wy = drawPtsBuf[0].y;
-      ctx.font = "600 11px Inter, system-ui, sans-serif";
+      ctx.font = "600 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
       ctx.fillStyle = "rgba(232,238,252,.9)";
       ctx.strokeStyle = "rgba(6,10,20,.65)";
       ctx.lineWidth = 3;
@@ -768,17 +1032,11 @@ SB.LiveEngine = function () {
     }
 
     /* Red ring while saving training frames — visible feedback only */
-
     if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" && SB.DataCapture.isRecording()) {
-
       ctx.strokeStyle = "rgba(255, 90, 90, .85)";
-
       ctx.lineWidth = 4;
-
       ctx.strokeRect(8, 8, canvasEl.width - 16, canvasEl.height - 16);
-
     }
-
   }
 
   function syncCanvasSize() {
@@ -788,13 +1046,14 @@ SB.LiveEngine = function () {
     if (canvasEl.width !== w || canvasEl.height !== h) {
       canvasEl.width = w;
       canvasEl.height = h;
+      overlayCtx = null;
     }
   }
 
   function clearCanvas() {
     if (!canvasEl) return;
-    var ctx = canvasEl.getContext("2d");
-    ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+    if (!overlayCtx) overlayCtx = canvasEl.getContext("2d");
+    overlayCtx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   }
 
   // ----------------------------------------------------------
@@ -813,6 +1072,14 @@ SB.LiveEngine = function () {
       renderFrameCount = 0;
       lastStatsTick = now;
       statsTick = true;
+      var inf = ringStats(inferLatRing, inferLatN);
+      var e2e = ringStats(e2eLatRing, e2eLatN);
+      var conf = ringStats(confirmLatRing, confirmLatN);
+      stats.inferMsAvg = inf.avg;
+      stats.inferMsP95 = inf.p95;
+      stats.e2eMsAvg = e2e.avg;
+      stats.e2eMsP95 = e2e.p95;
+      stats.confirmMsAvg = conf.avg;
     }
 
     var el = document.getElementById("trackHud");
@@ -833,11 +1100,15 @@ SB.LiveEngine = function () {
     el.textContent =
       "Cam " + stats.camFps.toFixed(0) +
       " · Infer " + stats.inferFps.toFixed(0) +
-      " (" + stats.inferMs.toFixed(0) + "ms)" +
+      " (" + stats.inferMs.toFixed(0) + "ms avg " + stats.inferMsAvg.toFixed(0) +
+      " p95 " + stats.inferMsP95.toFixed(0) + ")" +
+      " · E2E " + stats.e2eMsAvg.toFixed(0) + "/" + stats.e2eMsP95.toFixed(0) + "ms" +
       " · Draw " + stats.renderFps.toFixed(0) +
       " · Age " + stats.frameAgeMs.toFixed(0) + "ms" +
       " · Drop " + stats.dropped +
+      (stats.timeouts ? " · TO " + stats.timeouts : "") +
       " · Hands " + stats.hands +
+      " · " + stats.inferW + "×" + stats.inferH +
       " · " + stats.backend;
   }
 

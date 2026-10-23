@@ -12,6 +12,9 @@
 /* global importScripts */
 
 var holistic = null;
+var FilesetResolver = null;
+var HolisticLandmarker = null;
+var visionFileset = null;
 
 var HOLISTIC_MODEL =
   "https://storage.googleapis.com/mediapipe-models/" +
@@ -37,36 +40,61 @@ function serializeGroups(list) {
   return out;
 }
 
-async function init(preferGpu) {
+async function ensureVision() {
+  if (visionFileset && HolisticLandmarker) return;
   var visionModule = await import(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm"
   );
-  var FilesetResolver = visionModule.FilesetResolver;
-  var HolisticLandmarker = visionModule.HolisticLandmarker;
-
-  var vision = await FilesetResolver.forVisionTasks(
+  FilesetResolver = visionModule.FilesetResolver;
+  HolisticLandmarker = visionModule.HolisticLandmarker;
+  visionFileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
   );
+}
 
-  var opts = {
+function buildOpts(delegate) {
+  return {
     baseOptions: {
       modelAssetPath: HOLISTIC_MODEL,
-      delegate: preferGpu ? "GPU" : "CPU",
+      delegate: delegate,
     },
     runningMode: "VIDEO",
+    /* Skip unused heavy outputs — hands + pose are what we consume. */
+    outputFaceBlendshapes: false,
+    outputPoseSegmentationMasks: false,
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.5,
+    minPoseDetectionConfidence: 0.5,
+    minPosePresenceConfidence: 0.5,
   };
+}
 
+async function createHolistic(preferGpu) {
+  await ensureVision();
+  if (holistic && typeof holistic.close === "function") {
+    try { holistic.close(); } catch (e) {}
+  }
+  holistic = null;
+
+  var opts = buildOpts(preferGpu ? "GPU" : "CPU");
   try {
-    holistic = await HolisticLandmarker.createFromOptions(vision, opts);
+    holistic = await HolisticLandmarker.createFromOptions(visionFileset, opts);
+    return { delegate: opts.baseOptions.delegate };
   } catch (err) {
     if (preferGpu) {
-      opts.baseOptions.delegate = "CPU";
-      holistic = await HolisticLandmarker.createFromOptions(vision, opts);
-      return { delegate: "CPU", fallback: String(err && err.message || err) };
+      opts = buildOpts("CPU");
+      holistic = await HolisticLandmarker.createFromOptions(visionFileset, opts);
+      return {
+        delegate: "CPU",
+        fallback: String(err && err.message || err),
+      };
     }
     throw err;
   }
-  return { delegate: opts.baseOptions.delegate };
+}
+
+async function init(preferGpu) {
+  return createHolistic(preferGpu !== false);
 }
 
 self.onmessage = function (ev) {
@@ -76,6 +104,20 @@ self.onmessage = function (ev) {
     init(msg.preferGpu !== false)
       .then(function (info) {
         self.postMessage({ type: "ready", info: info });
+      })
+      .catch(function (err) {
+        self.postMessage({
+          type: "error",
+          error: String(err && err.message || err),
+        });
+      });
+    return;
+  }
+
+  if (msg.type === "reinit") {
+    createHolistic(msg.preferGpu === true)
+      .then(function (info) {
+        self.postMessage({ type: "ready", info: info, reinit: true });
       })
       .catch(function (err) {
         self.postMessage({

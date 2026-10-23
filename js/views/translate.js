@@ -14,8 +14,102 @@ SB.TranslateView = function () {
   var spotlight = null;
   var lastPrediction = null;
   var lastPredictionTime = 0;
+  /* Adaptive confirm: high-confidence static glosses commit faster. */
+  var pending = null; /* { text, conf, source, firstMs, lastMs } */
+  var confirmTimer = null;
 
   function live() { return SB.Engine.getLiveEngine(); }
+
+  function debounceMsFor(conf) {
+    conf = typeof conf === "number" ? conf : 0;
+    if (conf >= 0.9) return 450;
+    if (conf >= 0.75) return 900;
+    return 1600;
+  }
+
+  function holdMsFor(conf) {
+    conf = typeof conf === "number" ? conf : 0;
+    /* High-confidence static signs: short hold; lower conf needs longer stability. */
+    if (conf >= 0.9) return 120;
+    if (conf >= 0.8) return 220;
+    if (conf >= 0.7) return 350;
+    return 500;
+  }
+
+  function commitToken(tok, waitedMs) {
+    if (!tok || !tok.text) return;
+    var now = Date.now();
+    var textKey = String(tok.text).trim().toLowerCase();
+    if (
+      textKey &&
+      textKey === lastPrediction &&
+      now - lastPredictionTime < debounceMsFor(tok.conf)
+    ) {
+      return;
+    }
+    lastPrediction = textKey;
+    lastPredictionTime = now;
+    transcript.addToken(tok);
+    spotlight.show(tok);
+    try {
+      var eng = live();
+      if (eng && eng.noteConfirmMs) eng.noteConfirmMs(waitedMs || 0);
+    } catch (e) {}
+  }
+
+  function clearPending() {
+    pending = null;
+    if (confirmTimer != null) {
+      clearTimeout(confirmTimer);
+      confirmTimer = null;
+    }
+  }
+
+  function considerLiveToken(tok) {
+    if (!tok || !tok.text) return;
+    var now = performance.now();
+    var text = String(tok.text).trim();
+    var conf = typeof tok.conf === "number" ? tok.conf : 0;
+    var hold = holdMsFor(conf);
+
+    if (pending && pending.text === text) {
+      pending.lastMs = now;
+      pending.conf = Math.max(pending.conf, conf);
+      if (now - pending.firstMs >= holdMsFor(pending.conf)) {
+        var waited = now - pending.firstMs;
+        var out = {
+          text: pending.text,
+          conf: pending.conf,
+          alt: tok.alt,
+          glyph: tok.glyph,
+          source: tok.source || pending.source || "live",
+        };
+        clearPending();
+        commitToken(out, waited);
+      }
+      return;
+    }
+
+    clearPending();
+    pending = {
+      text: text,
+      conf: conf,
+      source: tok.source || "live",
+      firstMs: now,
+      lastMs: now,
+    };
+    confirmTimer = setTimeout(function () {
+      if (!pending || pending.text !== text) return;
+      var waited = performance.now() - pending.firstMs;
+      var out = {
+        text: pending.text,
+        conf: pending.conf,
+        source: pending.source,
+      };
+      clearPending();
+      commitToken(out, waited);
+    }, hold + 16);
+  }
 
   function init() {
     transcript = new SB.Transcript(SB.$("#transcript"));
@@ -23,8 +117,7 @@ SB.TranslateView = function () {
 
     SB.Engine.on("result", function (tok) {
       if (SB.Engine.getMode() === "live") {
-        transcript.addToken(tok);
-        spotlight.show(tok);
+        considerLiveToken(tok);
         /* keep one continuous sentence — do not open a new card per word */
       }
     });
@@ -45,30 +138,16 @@ SB.TranslateView = function () {
           return;
         }
 
-        var now = Date.now();
-              
-        if (
-          result.prediction === lastPrediction &&
-          now - lastPredictionTime < 2000
-        ) {
-          return;
-        }
-        
-        lastPrediction = result.prediction;
-        lastPredictionTime = now;
-
-        var token = {
+        considerLiveToken({
           text: result.prediction,
-          conf: result.confidence
-        };
-
-        transcript.addToken(token);
-        spotlight.show(token);
-        /* keep one continuous sentence — do not open a new card per word */
+          conf: result.confidence,
+          source: "lstm",
+        });
 
         console.log(
-          "SignBridge transcript updated:",
-          token.text
+          "SignBridge transcript candidate:",
+          result.prediction,
+          result.confidence
         );
       }
     );
@@ -295,11 +374,16 @@ SB.TranslateView = function () {
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
 
+    var wantHud = !!(SB.settings && SB.settings.perfHud);
+    try {
+      wantHud = wantHud || /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(location.search || "");
+    } catch (e) {}
     SB.Engine.setMode("live", {
       videoEl: SB.$("#cam"),
       canvasEl: SB.$("#overlay"),
       mirror: SB.settings.mirror,
       drawLandmarks: SB.settings.landmarks !== false,
+      showHud: wantHud,
     }).then(function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");

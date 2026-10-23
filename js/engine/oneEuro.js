@@ -21,6 +21,18 @@ SB.OneEuroFilter.prototype.reset = function () {
   this.tPrev = null;
 };
 
+/** Keep last position, clear velocity — recovers from brief occlusion without a sticky lag. */
+SB.OneEuroFilter.prototype.softReset = function () {
+  this.dxPrev = 0;
+  this.tPrev = null;
+};
+
+SB.OneEuroFilter.prototype.setParams = function (minCutoff, beta, dCutoff) {
+  if (minCutoff != null) this.minCutoff = minCutoff;
+  if (beta != null) this.beta = beta;
+  if (dCutoff != null) this.dCutoff = dCutoff;
+};
+
 SB.OneEuroFilter.prototype.filter = function (t, x) {
   if (this.tPrev == null) {
     this.tPrev = t;
@@ -51,14 +63,21 @@ SB._oneEuroLowpass = function (x, xPrev, a) {
   return a * x + (1 - a) * xPrev;
 };
 
-/** Per-hand landmark filter bank: 21 joints × (x,y[,z]). */
+/**
+ * Per-hand landmark filter bank: 21 joints × (x,y[,z]).
+ * Adaptive: raises beta when landmarks move fast; soft-resets after gaps.
+ */
 SB.HandLandmarkFilter = function (opts) {
   opts = opts || {};
-  this.minCutoff = opts.minCutoff == null ? 1.35 : opts.minCutoff;
-  this.beta = opts.beta == null ? 0.55 : opts.beta;
+  this.baseMinCutoff = opts.minCutoff == null ? 1.8 : opts.minCutoff;
+  this.baseBeta = opts.beta == null ? 0.95 : opts.beta;
   this.dCutoff = opts.dCutoff == null ? 1.0 : opts.dCutoff;
   this.includeZ = !!opts.includeZ;
+  this.minCutoff = this.baseMinCutoff;
+  this.beta = this.baseBeta;
   this.filters = [];
+  this._lastT = null;
+  this._misses = 0;
   this._ensure(21);
 };
 
@@ -78,6 +97,35 @@ SB.HandLandmarkFilter.prototype.reset = function () {
     this.filters[i].y.reset();
     this.filters[i].z.reset();
   }
+  this._lastT = null;
+  this._misses = 0;
+  this.minCutoff = this.baseMinCutoff;
+  this.beta = this.baseBeta;
+};
+
+SB.HandLandmarkFilter.prototype.softReset = function () {
+  for (var i = 0; i < this.filters.length; i++) {
+    this.filters[i].x.softReset();
+    this.filters[i].y.softReset();
+    this.filters[i].z.softReset();
+  }
+  this._lastT = null;
+};
+
+SB.HandLandmarkFilter.prototype.noteMiss = function () {
+  this._misses++;
+  /* Brief occlusion: soft reset so reacquire isn't oversmoothed.
+     Longer gaps: hard reset. */
+  if (this._misses === 2) this.softReset();
+  else if (this._misses >= 6) this.reset();
+};
+
+SB.HandLandmarkFilter.prototype._applyParams = function () {
+  for (var i = 0; i < this.filters.length; i++) {
+    this.filters[i].x.setParams(this.minCutoff, this.beta, this.dCutoff);
+    this.filters[i].y.setParams(this.minCutoff, this.beta, this.dCutoff);
+    this.filters[i].z.setParams(this.minCutoff, this.beta, this.dCutoff);
+  }
 };
 
 /**
@@ -86,8 +134,38 @@ SB.HandLandmarkFilter.prototype.reset = function () {
  * @param {Array<{x,y,z}>} out   reusable output buffer (length 21)
  */
 SB.HandLandmarkFilter.prototype.apply = function (tSec, landmarks, out) {
-  if (!landmarks || !landmarks.length) return null;
+  if (!landmarks || !landmarks.length) {
+    this.noteMiss();
+    return null;
+  }
+  this._misses = 0;
   this._ensure(landmarks.length);
+
+  /* Adaptive responsiveness from wrist + middle-tip speed */
+  if (this._lastT != null && landmarks[0] && this.filters[0].x.xPrev != null) {
+    var dt = Math.max(1e-3, tSec - this._lastT);
+    var wx = landmarks[0].x - this.filters[0].x.xPrev;
+    var wy = landmarks[0].y - this.filters[0].y.xPrev;
+    var tip = landmarks[12] || landmarks[8] || landmarks[0];
+    var fTip = this.filters[12] || this.filters[8] || this.filters[0];
+    var tx = tip.x - (fTip.x.xPrev != null ? fTip.x.xPrev : tip.x);
+    var ty = tip.y - (fTip.y.xPrev != null ? fTip.y.xPrev : tip.y);
+    var speed = Math.sqrt(wx * wx + wy * wy + tx * tx + ty * ty) / dt;
+    /* speed in norm-units/sec; ~0.2 idle, >1.5 fast swipe */
+    if (speed > 1.2) {
+      this.minCutoff = this.baseMinCutoff + 0.6;
+      this.beta = this.baseBeta + 0.85;
+    } else if (speed > 0.45) {
+      this.minCutoff = this.baseMinCutoff + 0.25;
+      this.beta = this.baseBeta + 0.35;
+    } else {
+      this.minCutoff = this.baseMinCutoff;
+      this.beta = this.baseBeta;
+    }
+    this._applyParams();
+  }
+  this._lastT = tSec;
+
   if (!out) out = [];
   for (var i = 0; i < landmarks.length; i++) {
     var p = landmarks[i];

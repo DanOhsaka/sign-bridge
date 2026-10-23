@@ -16,6 +16,7 @@ SB.SettingsView = function () {
     bindToggle("setMirror", "mirror");
     bindToggle("setLandmarks", "landmarks");
     bindToggle("setReduceMotion", "reduceMotion");
+    bindToggle("setPerfHud", "perfHud");
     bindRate();
     bindThreshold();
     bindReset();
@@ -120,6 +121,7 @@ SB.SettingsView = function () {
             var stage = SB.$("#stage");
             if (stage) stage.classList.toggle("is-mirror", !!SB.settings.mirror && stage.classList.contains("is-cam"));
           }
+          if (key === "perfHud" && eng.setShowHud) eng.setShowHud(!!SB.settings.perfHud);
         }
       } catch (e) {}
     });
@@ -166,6 +168,8 @@ SB.SettingsView = function () {
     if (landmarks) landmarks.classList.toggle("is-on", SB.settings.landmarks);
     var reduce = SB.$("#setReduceMotion");
     if (reduce) reduce.classList.toggle("is-on", SB.settings.reduceMotion);
+    var perfHud = SB.$("#setPerfHud");
+    if (perfHud) perfHud.classList.toggle("is-on", !!SB.settings.perfHud);
     var rate = SB.$("#setRate");
     var rateVal = SB.$("#setRateVal");
     if (rate) {
