@@ -388,7 +388,13 @@ SB.TranslateView = function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
-      if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.start === "function") {
+      /* LSTM needs Holistic pose — only auto-start with ?holistic=1 */
+      var wantLstm = false;
+      try {
+        wantLstm = /(?:^|[?&])holistic=1(?:&|$)/.test(location.search || "");
+      } catch (e) {}
+      if (wantLstm && window.SignBridgeLiveTest &&
+          typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();
       }
 

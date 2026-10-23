@@ -70,9 +70,10 @@ function buildHandOpts(delegate) {
     },
     runningMode: "VIDEO",
     numHands: 2,
-    minHandDetectionConfidence: 0.45,
-    minHandPresenceConfidence: 0.45,
-    minTrackingConfidence: 0.45,
+    /* Slightly higher detect threshold → fewer palm-search retries once tracking. */
+    minHandDetectionConfidence: 0.5,
+    minHandPresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
   };
 }
 

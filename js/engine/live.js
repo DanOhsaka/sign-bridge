@@ -110,19 +110,24 @@ SB.LiveEngine = function () {
   /*
    * Adaptive infer width: start modest, drop if e2e/FPS miss target.
    * Display/overlay always uses full video resolution.
+   * Pass 4: tighter caps (GPU 480 / CPU 360 / low 288).
    */
-  var INFER_MAX_W_GPU = 560;
-  var INFER_MAX_W_CPU = 480;
-  var INFER_MAX_W_LOW = 360;
+  var INFER_MAX_W_GPU = 480;
+  var INFER_MAX_W_CPU = 360;
+  var INFER_MAX_W_LOW = 288;
   var INFER_MAX_W = INFER_MAX_W_GPU;
-  var TARGET_INFER_FPS = 18;
-  var TARGET_E2E_MS = 70;
+  var TARGET_INFER_FPS = 20;
+  var TARGET_E2E_MS = 90;
 
   /* Busy-gate watchdog — GPU can hang on some headless/SwiftShader hosts. */
-  var INFER_WATCHDOG_MS = 700;
-  var GPU_PROBE_MS = 1800;
+  var INFER_WATCHDOG_MS = 650;
+  var GPU_PROBE_MS = 1000; /* HandLandmarker fails faster than Holistic */
   var gpuProbeDone = false;
   var gpuFallbackTried = false;
+
+  /* Latest-frame pending: when busy, remember newest cam time; kick on release */
+  var pendingKick = null;
+  var pendingKickCount = 0;
 
   /* Perf / HUD */
   var LAT_RING = 48;
@@ -156,6 +161,7 @@ SB.LiveEngine = function () {
     holds: 0,
     jumps: 0,
     swapsBlocked: 0,
+    pendingKicks: 0,
   };
   var camFrameCount = 0;
   var inferFrameCount = 0;
@@ -326,16 +332,14 @@ SB.LiveEngine = function () {
     initWorker()
       .then(function () {
         stats.backend = "worker/CPU/" + modelKind + "(fallback)";
-        inferenceBusy = false;
-        clearInferWatchdog();
+      releaseBusy(true);
         console.log("CPU worker ready after GPU stall.");
       })
       .catch(function (err) {
         console.error("CPU worker fallback failed:", err);
         return initMainThreadLandmarker().then(function () {
           useWorker = false;
-          inferenceBusy = false;
-          clearInferWatchdog();
+          releaseBusy(true);
         });
       });
   }
@@ -356,18 +360,16 @@ SB.LiveEngine = function () {
       stats.model = modelKind;
       stats.backend = "worker/" + del + "/" + modelKind +
         (gpuFallbackTried ? "(fallback)" : "");
-      inferenceBusy = false;
-      clearInferWatchdog();
+      releaseBusy(true);
       console.log("Worker reinit ready (" + stats.backend + ").");
       return;
     }
     if (msg.type === "result") {
-      clearInferWatchdog();
       var now = performance.now();
       /* Stale / out-of-order: only the newest detect id may update tracks */
       if (msg.id != null && msg.id < lastAcceptedDetectId) {
         stats.stale++;
-        inferenceBusy = false;
+        releaseBusy(true);
         return;
       }
       if (msg.id != null) lastAcceptedDetectId = msg.id;
@@ -397,16 +399,14 @@ SB.LiveEngine = function () {
       } catch (err) {
         console.error("ingestResults error:", err);
       } finally {
-        /* Always clear, even if ingest throws: a stranded busy gate drops
-           every later frame and inference never runs again. */
-        inferenceBusy = false;
+        /* Always clear + kick latest pending cam frame (latest-frame wins). */
+        releaseBusy(true);
       }
       return;
     }
     if (msg.type === "error") {
       console.error("Hand worker detect error:", msg.error);
-      clearInferWatchdog();
-      inferenceBusy = false;
+      releaseBusy(true);
     }
   }
 
@@ -672,6 +672,7 @@ SB.LiveEngine = function () {
 
   self.stop = function () {
     running = false;
+    pendingKick = null;
     inferenceBusy = false;
     clearInferWatchdog();
     stopInferenceLoop();
@@ -703,6 +704,8 @@ SB.LiveEngine = function () {
     leftSlot.reset();
     rightSlot.reset();
     lastAcceptedDetectId = 0;
+    pendingKick = null;
+    pendingKickCount = 0;
     stats.dropped = 0;
     stats.timeouts = 0;
     stats.stale = 0;
@@ -710,6 +713,7 @@ SB.LiveEngine = function () {
     stats.holds = 0;
     stats.jumps = 0;
     stats.swapsBlocked = 0;
+    stats.pendingKicks = 0;
     inferLatN = e2eLatN = confirmLatN = 0;
     _inferIdx.i = _e2eIdx.i = _confirmIdx.i = 0;
     gpuProbeDone = false;
@@ -738,30 +742,49 @@ SB.LiveEngine = function () {
   function renderKickInfer() {
     if (!running) return;
     if (!inferenceBusy) runInference(performance.now(), null);
-    else maybeWatchdog(performance.now());
+    else {
+      pendingKick = { now: performance.now(), mediaMs: null };
+      stats.dropped++;
+      maybeWatchdog(performance.now());
+    }
     requestAnimationFrame(renderKickInfer);
   }
 
   function onVideoFrame(now, metadata) {
     if (!running) return;
     camFrameCount++;
+    var mediaMs = metadata && metadata.mediaTime != null
+      ? metadata.mediaTime * 1000
+      : now;
 
     if (inferenceBusy) {
-      /* Model still working — discard this camera frame. Freshness > completeness. */
+      /* Keep only the newest camera time — kick it the instant infer frees. */
+      pendingKick = { now: now, mediaMs: mediaMs };
       stats.dropped++;
       maybeWatchdog(now);
     } else {
-      var mediaMs = metadata && metadata.mediaTime != null
-        ? metadata.mediaTime * 1000
-        : now;
-      /* Fire-and-forget: re-register RVFC immediately so later frames can be dropped
-         while this one is still in flight (async bitmap + sync detect). */
       runInference(now, mediaMs);
     }
 
     if (running && useRvfc) {
       rvfcHandle = videoEl.requestVideoFrameCallback(onVideoFrame);
     }
+  }
+
+  /** Clear busy gate; optionally start the latest pending frame immediately. */
+  function releaseBusy(doKick) {
+    clearInferWatchdog();
+    inferenceBusy = false;
+    if (doKick === false || !running) return;
+    if (!pendingKick) return;
+    var p = pendingKick;
+    pendingKick = null;
+    pendingKickCount++;
+    stats.pendingKicks = pendingKickCount;
+    queueMicrotask(function () {
+      if (!running || inferenceBusy) return;
+      runInference(p.now, p.mediaMs);
+    });
   }
 
   function clearInferWatchdog() {
@@ -786,12 +809,13 @@ SB.LiveEngine = function () {
       if (!inferenceBusy || !running) return;
       stats.timeouts++;
       stats.dropped++;
-      inferenceBusy = false;
       inferWatchdog = null;
       if (preferGpu && !gpuFallbackTried) {
+        releaseBusy(false);
         fallbackWorkerToCpu("watchdog " + limit + "ms");
       } else {
         console.warn("Inference watchdog fired after " + limit + "ms — releasing busy gate.");
+        releaseBusy(true);
       }
     }, limit);
   }
@@ -800,12 +824,12 @@ SB.LiveEngine = function () {
     if (!inferenceBusy) return;
     var limit = watchdogLimitMs();
     if (busySinceMs && now - busySinceMs > limit + 50) {
-      /* rAF path backup if timer was throttled */
-      clearInferWatchdog();
       stats.timeouts++;
-      inferenceBusy = false;
       if (preferGpu && !gpuFallbackTried) {
+        releaseBusy(false);
         fallbackWorkerToCpu("busy age");
+      } else {
+        releaseBusy(true);
       }
     }
   }
@@ -819,6 +843,7 @@ SB.LiveEngine = function () {
     ) {
       return;
     }
+    if (inferenceBusy) return;
 
     inferenceBusy = true;
     var t0 = performance.now();
@@ -833,15 +858,10 @@ SB.LiveEngine = function () {
     if (ts <= lastMediaTimestampMs) ts = lastMediaTimestampMs + 1;
     lastMediaTimestampMs = ts;
 
-    /* Downscale on main via drawImage (cheap), then transfer a same-size
-       bitmap — avoids resize inside createImageBitmap which was costly. */
-    inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
-
     var sendInput = function (input) {
       if (!running) {
         if (input && input.close) input.close();
-        clearInferWatchdog();
-        inferenceBusy = false;
+        releaseBusy(false);
         return;
       }
 
@@ -862,16 +882,14 @@ SB.LiveEngine = function () {
 
       if (useWorker && !workerReady) {
         if (input && input.close) input.close();
-        clearInferWatchdog();
-        inferenceBusy = false;
         stats.dropped++;
+        releaseBusy(true);
         return;
       }
 
       if (!landmarker) {
         if (input && input.close) input.close();
-        clearInferWatchdog();
-        inferenceBusy = false;
+        releaseBusy(true);
         return;
       }
 
@@ -889,24 +907,45 @@ SB.LiveEngine = function () {
       e2eLatN = _e2eIdx.i;
       tunePredictFromE2e(stats.e2eMs);
       if (!gpuProbeDone) gpuProbeDone = true;
-      ingestResults(results, lastInferEndMs, ts);
-      clearInferWatchdog();
-      inferenceBusy = false;
+      try {
+        ingestResults(results, lastInferEndMs, ts);
+      } catch (err) {
+        console.error("ingestResults error:", err);
+      }
+      releaseBusy(true);
     };
 
+    /*
+     * Prefer one-step resize from the video element. Fall back to
+     * drawImage→bitmap if video bitmap hangs (seen on some fakes).
+     */
     if (typeof createImageBitmap === "function" && useWorker) {
-      createImageBitmap(canvas)
+      var fromVideo = createImageBitmap(videoEl, {
+        resizeWidth: targetW,
+        resizeHeight: targetH,
+        resizeQuality: "low",
+      });
+      Promise.race([
+        fromVideo,
+        new Promise(function (_, reject) {
+          setTimeout(function () { reject(new Error("bitmap timeout")); }, 100);
+        }),
+      ])
+        .catch(function () {
+          inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
+          return createImageBitmap(canvas);
+        })
         .then(sendInput)
         .catch(function () {
-          /* Last resort: main-thread detect on the canvas (blocks briefly). */
+          inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
           if (landmarker) sendInput(null);
           else {
-            clearInferWatchdog();
-            inferenceBusy = false;
             stats.dropped++;
+            releaseBusy(true);
           }
         });
     } else {
+      inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
       sendInput(null);
     }
   }
@@ -1010,10 +1049,29 @@ SB.LiveEngine = function () {
 
     if (!runHeavy) return;
 
-    /* LSTM/training only on accepted landmarks (stable shape) */
+    /* Hands mode has no pose — skip LSTM entirely (needs shoulders).
+       Training only while actively recording. */
+    var recording = false;
+    try {
+      if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function") {
+        recording = !!SB.DataCapture.isRecording();
+      }
+      if (!recording && window.TrainingRecorder &&
+          typeof window.TrainingRecorder.status === "function") {
+        var stRec = window.TrainingRecorder.status();
+        recording = !!(stRec && stRec.recording);
+      }
+    } catch (e) {}
+    var wantLstm = modelKind === "holistic" &&
+      window.SignBridgeLiveTest &&
+      typeof window.SignBridgeLiveTest.processFrame === "function" &&
+      window.SignBridgeLiveTest.status &&
+      window.SignBridgeLiveTest.status().active;
+    if (!recording && !wantLstm) return;
+
     var snapLeft = leftUp.accepted ? leftSlot.lastRaw : null;
     var snapRight = rightUp.accepted ? rightSlot.lastRaw : null;
-    if (!snapLeft && !snapRight && modelKind !== "holistic") return;
+    if (!snapLeft && !snapRight && !wantLstm) return;
 
     var snapResults = {
       leftHandLandmarks: snapLeft ? [snapLeft] : [],
@@ -1021,7 +1079,7 @@ SB.LiveEngine = function () {
       poseLandmarks: results.poseLandmarks || [],
     };
     queueMicrotask(function () {
-      if (window.TrainingRecorder &&
+      if (recording && window.TrainingRecorder &&
           typeof window.TrainingRecorder.processFrame === "function") {
         try {
           window.TrainingRecorder.processFrame(snapResults, snapLeft, snapRight);
@@ -1030,8 +1088,7 @@ SB.LiveEngine = function () {
         }
       }
 
-      if (window.SignBridgeLiveTest &&
-          typeof window.SignBridgeLiveTest.processFrame === "function") {
+      if (wantLstm) {
         try {
           window.SignBridgeLiveTest.processFrame(snapResults, snapLeft, snapRight);
         } catch (err) {
@@ -1327,6 +1384,7 @@ SB.LiveEngine = function () {
       " · Jump " + stats.jumps +
       " · Hold " + stats.holds +
       (stats.stale ? " · Stale " + stats.stale : "") +
+      (stats.pendingKicks ? " · Pend " + stats.pendingKicks : "") +
       (stats.swapsBlocked ? " · SwapBlk " + stats.swapsBlocked : "") +
       " · Hands " + stats.hands +
       " · " + stats.inferW + "×" + stats.inferH +
