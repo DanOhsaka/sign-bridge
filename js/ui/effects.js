@@ -19,8 +19,15 @@ SB.mountEffects = function () {
   }
 
   try {
-    SB._mountBeams();
+    /* Three.js owns the deep atmosphere when available; keep CSS beams as fallback */
+    if (SB.mountThreeFX) {
+      SB.mountThreeFX();
+    }
+    if (!document.documentElement.classList.contains("sb-has-three")) {
+      SB._mountBeams();
+    }
     SB._mountSpotlight();
+    SB._spotlightTrack();
     SB._enhanceCards();
     SB._enhanceButtons();
     SB._glidingPills();
@@ -74,6 +81,44 @@ SB._mountSpotlight = function () {
   document.body.prepend(el);
 };
 
+
+/* Full-viewport spotlight follow — not bound to .app / columns */
+SB._spotlightTrack = function () {
+  if (SB._spotlightBound) return;
+  SB._spotlightBound = true;
+  var spot = null;
+  var raf = 0;
+  var tx = 50;
+  var ty = 38;
+  var x = 50;
+  var y = 38;
+
+  function ensure() {
+    spot = document.querySelector(".ac-spotlight");
+    return spot;
+  }
+
+  function tick() {
+    raf = 0;
+    if (!ensure()) return;
+    x += (tx - x) * 0.18;
+    y += (ty - y) * 0.18;
+    spot.style.setProperty("--sx", x.toFixed(2) + "%");
+    spot.style.setProperty("--sy", y.toFixed(2) + "%");
+    if (Math.abs(tx - x) > 0.05 || Math.abs(ty - y) > 0.05) {
+      raf = requestAnimationFrame(tick);
+    }
+  }
+
+  window.addEventListener("pointermove", function (e) {
+    var w = window.innerWidth || 1;
+    var h = window.innerHeight || 1;
+    tx = (e.clientX / w) * 100;
+    ty = (e.clientY / h) * 100;
+    if (!raf) raf = requestAnimationFrame(tick);
+  }, { passive: true });
+};
+
 /* Aceternity wobble / tilt on interactive cards */
 SB._enhanceCards = function (root) {
   var scope = root || document;
@@ -90,7 +135,15 @@ SB._enhanceCards = function (root) {
     SB.$$(sel, scope).forEach(function (card) {
       if (card.dataset.acEnhanced) return;
       card.dataset.acEnhanced = "1";
-      card.classList.add("ac-wobble", "ac-glare", "ac-glass");
+      card.classList.add("ac-wobble", "ac-glass");
+      /* Arena/auth are large layout panels — glare reads as a mid-page wash */
+      if (
+        !card.classList.contains("arena") &&
+        !card.classList.contains("auth-welcome") &&
+        !card.classList.contains("auth-form-card")
+      ) {
+        card.classList.add("ac-glare");
+      }
 
       card.addEventListener("pointermove", function (e) {
         var r = card.getBoundingClientRect();
@@ -115,7 +168,16 @@ SB._enhanceCards = function (root) {
   SB.$$(".stage-card, .transcript-card, .etiquette", scope).forEach(function (card) {
     if (card.dataset.acGlass) return;
     card.dataset.acGlass = "1";
-    card.classList.add("ac-glass", "ac-glare");
+    /* Heavy layout cards: opaque glass, no glare wash (avoids L/R Three bleed seam) */
+    if (
+      card.classList.contains("stage-card") ||
+      card.classList.contains("transcript-card") ||
+      card.classList.contains("etiquette")
+    ) {
+      card.classList.add("ac-glass");
+    } else {
+      card.classList.add("ac-glass", "ac-glare");
+    }
   });
 };
 

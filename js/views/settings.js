@@ -106,7 +106,10 @@ SB.SettingsView = function () {
       SB.settings[key] = !SB.settings[key];
       SB.saveSettings();
       syncForm();
-      if (key === "reduceMotion") SB.applyTheme();
+      if (key === "reduceMotion") {
+        SB.applyTheme();
+        if (SB.refreshThreeMotion) SB.refreshThreeMotion();
+      }
       /* Keep live camera overlay/mirror in sync with settings drawer */
       try {
         var eng = SB.Engine && SB.Engine.getLiveEngine && SB.Engine.getLiveEngine();
