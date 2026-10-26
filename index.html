@@ -12,9 +12,9 @@
     [data-theme="light"] body { background: #e4e9f2; color: #0c1424; }
   </style>
   <link rel="stylesheet" href="styles/main.css?v=20261022l">
-  <link rel="stylesheet" href="styles/views.css?v=20261026tx2">
+  <link rel="stylesheet" href="styles/views.css?v=20261026qp">
   <link rel="stylesheet" href="styles/polish.css?v=20261026tx">
-  <link rel="stylesheet" href="styles/effects.css?v=20261026tx2">
+  <link rel="stylesheet" href="styles/effects.css?v=20261026qp">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -128,6 +128,12 @@
         <div class="demo-hint">Tip: switch to <strong>Live</strong> for real MediaPipe hand landmarks — the same skeleton your trained model will read.</div>
       </div>
 
+      <!-- Quick phrases stay high in the card so chips aren't below the fold -->
+      <div class="quick-phrases">
+        <div class="q-label">Quick phrases — press a number or click to sign</div>
+        <div class="q-chips" id="quickChips"></div>
+      </div>
+
       <div class="spell-strip">
         <input class="input" id="spellInput" placeholder="Spell any word with your hands — try DOG, or your name…" maxlength="24" aria-label="Spell a word">
         <button class="btn-grad btn-sm" id="spellGo">
@@ -146,11 +152,6 @@
         <div class="spotlight-word">—</div>
         <div class="conf-meter" aria-hidden="true"><div class="conf-fill" style="width:0%"></div></div>
         <div class="spotlight-alts"></div>
-      </div>
-
-      <div class="quick-phrases">
-        <div class="q-label">🤟 Quick phrases — press a number or click to sign</div>
-        <div class="q-chips" id="quickChips"></div>
       </div>
     </section>
 
@@ -280,7 +281,7 @@
 <script src="js/training/training.js?v=20261022l"></script>
 <script src="./js/engine/lstm-live-test.js?v=20261023p"></script>
 <script src="js/engine/live.js?v=20261026p8h"></script>
-<script src="js/views/translate.js?v=20261026tx"></script>
+<script src="js/views/translate.js?v=20261026qp"></script>
 <script src="js/views/settings.js?v=20261023p"></script>
 <script src="js/app.js?v=20261022l"></script>
 <script>

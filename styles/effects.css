@@ -465,7 +465,20 @@ html.sb-has-three body::before {
 #stage {
   isolation: isolate;
 }
-/* Dark: opaque panels kill mid-screen Three bleed */
+/* Dark panels stay readable but leave edge bleed for Three atmosphere.
+   Translate used to force a full-viewport opaque transcript slab — avoid that. */
+html[data-theme="dark"] .view--translate {
+  background: transparent;
+}
+html[data-theme="dark"] .view--translate .transcript-card,
+html[data-theme="dark"].sb-has-three .view--translate .transcript-card {
+  background: color-mix(in srgb, #0d1425 92%, transparent) !important;
+}
+html[data-theme="dark"] .view--translate .stage-card,
+html[data-theme="dark"].sb-has-three .view--translate .stage-card {
+  background: color-mix(in srgb, #0d1425 94%, transparent) !important;
+}
+/* Dark: opaque panels kill mid-screen Three bleed on stage media */
 html[data-theme="dark"] #stage,
 html[data-theme="dark"].sb-has-three #stage {
   background: #0d1425 !important;

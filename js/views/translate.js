@@ -379,6 +379,8 @@ SB.TranslateView = function () {
     setPill("demo");
     refreshCapturePanelVisibility();
     if (transcript && transcript.setStatus) transcript.setStatus("Idle", false);
+    /* Restore page atmosphere when leaving live camera */
+    if (SB.resumeThreeFX) SB.resumeThreeFX();
   }
 
   function goLive() {
@@ -387,6 +389,8 @@ SB.TranslateView = function () {
     setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
+    /* Live cam owns the stage plane — pause bg motion to save GPU while filming */
+    if (SB.pauseThreeFX) SB.pauseThreeFX();
 
     /* Perf HUD never auto-on with Live — only Settings / ?perf=1 / ?debugTrack=1 */
     var wantHud = !!(SB.settings && SB.settings.perfHud);
@@ -434,6 +438,7 @@ SB.TranslateView = function () {
         (err && err.message ? err.message : "Permission denied or no camera found.") + " You can stay in Demo mode.");
 
       setPill("demo", true);
+      if (SB.resumeThreeFX) SB.resumeThreeFX();
       SB.toast("Live mode needs a camera â€” " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
       SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
       setTimeout(function () {
@@ -475,22 +480,31 @@ SB.TranslateView = function () {
     });
   }
 
-  /* ---------- quick phrases (chips + hotkeys 1â€“9) ---------- */
+  /* ---------- quick phrases (chips + hotkeys 1–9) ---------- */
   function bindQuickPhrases() {
     var wrap = SB.$("#quickChips");
-    SB.QUICK_PHRASES.forEach(function (p, i) {
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    var list = SB.QUICK_PHRASES || [];
+    list.forEach(function (p, i) {
+      var phrase = SB.PHRASE_MAP && SB.PHRASE_MAP[p.id];
+      if (!phrase) return;
       var btn = document.createElement("button");
+      btn.type = "button";
       btn.className = "chip";
-      btn.innerHTML = '<span>' + p.emoji + "</span> " + SB.PHRASE_MAP[p.id].name + '<span class="kbd-hint">' + (i + 1) + "</span>";
+      btn.innerHTML =
+        "<span aria-hidden=\"true\">" + (p.emoji || "") + "</span> " +
+        SB.escHtml(phrase.name) +
+        '<span class="kbd-hint">' + (i + 1) + "</span>";
       btn.addEventListener("click", function () { signPhrase(p.id); });
       wrap.appendChild(btn);
     });
 
     document.addEventListener("keydown", function (e) {
-      if (e.target.tagName === "INPUT") return;
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       var n = parseInt(e.key, 10);
-      if (n >= 1 && n <= SB.QUICK_PHRASES.length) {
-        signPhrase(SB.QUICK_PHRASES[n - 1].id);
+      if (n >= 1 && n <= list.length) {
+        signPhrase(list[n - 1].id);
       }
     });
   }

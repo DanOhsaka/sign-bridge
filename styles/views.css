@@ -15,7 +15,8 @@
   box-sizing: border-box;
 }
 
-.stage-card { overflow: hidden; }
+/* Never clip Quick Phrases / spotlight under the stage card */
+.stage-card { overflow: visible; }
 
 .stage-head {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
@@ -370,7 +371,11 @@
 }
 
 /* Quick phrases strip */
-.quick-phrases { padding: 14px 20px 20px; }
+.quick-phrases {
+  padding: 14px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
 .quick-phrases .q-label {
   font-size: 10.5px;
   font-weight: 700;
@@ -379,7 +384,17 @@
   color: var(--text-3);
   margin-bottom: 10px;
 }
-.q-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.q-chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-height: 36px;
+}
+.q-chips .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 /* ============================================================
    TRANSCRIPT — interactive LIVE TRANSCRIPT workspace
@@ -387,9 +402,11 @@
 .transcript-card {
   display: flex;
   flex-direction: column;
-  min-height: min(720px, calc(100vh - 120px));
-  max-height: calc(100vh - 120px);
-  height: calc(100vh - 120px);
+  /* Fill useful space without forcing a full-viewport opaque slab that
+     buries the Three.js atmosphere (and used to push Quick Phrases off-screen). */
+  min-height: min(640px, calc(100vh - 160px));
+  max-height: calc(100vh - 140px);
+  height: auto;
   position: sticky;
   top: 20px;
   overflow: hidden;
