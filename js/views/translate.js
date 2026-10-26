@@ -324,6 +324,19 @@ SB.TranslateView = function () {
     });
   }
 
+  function setDemoEmptyVisible(show) {
+    var demo = SB.$("#stageDemo");
+    var hint = SB.$("#demoHintBar");
+    if (demo) {
+      demo.style.display = show ? "" : "none";
+      demo.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+    if (hint) {
+      hint.hidden = !show;
+      hint.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+  }
+
   function setStageOverlay(kind, title, detail) {
     var stage = SB.$("#stage");
     var overlay = SB.$("#stageOverlay");
@@ -333,6 +346,8 @@ SB.TranslateView = function () {
       if (overlay) overlay.hidden = true;
       return;
     }
+    /* Live overlay owns the stage copy — never stack Demo tip / empty state under it */
+    setDemoEmptyVisible(false);
     stage.classList.add(kind === "error" ? "is-error" : "is-starting");
     if (!overlay) return;
     overlay.hidden = false;
@@ -351,10 +366,9 @@ SB.TranslateView = function () {
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
     var stage = SB.$("#stage");
-    stage.classList.remove("is-cam", "is-mirror");
+    stage.classList.remove("is-cam", "is-mirror", "is-starting", "is-error");
     setStageOverlay(null);
-    SB.$("#stageDemo").style.display = "";
-    var _hint = SB.$("#demoHintBar"); if (_hint) _hint.hidden = false;
+    setDemoEmptyVisible(true);
     SB.$("#mirrorToggle").classList.remove("is-on");
     var st = SB.$("#stageStatus");
     if (st) {
@@ -368,8 +382,7 @@ SB.TranslateView = function () {
 
   function goLive() {
     var stage = SB.$("#stage");
-    SB.$("#stageDemo").style.display = "none";
-    var _hint = SB.$("#demoHintBar"); if (_hint) _hint.hidden = true;
+    setDemoEmptyVisible(false);
     setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';

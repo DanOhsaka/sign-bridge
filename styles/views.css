@@ -59,6 +59,18 @@
   overflow: hidden;
   padding: 0;
 }
+/* Starting / error: keep a real stage plane so overlay copy isn't crushed
+   when Demo empty-state is hidden (and tip bar is gone). Beat polish's
+   `.stage:not(.is-cam) { aspect-ratio: auto }` so the overlay has room. */
+.stage.is-starting:not(.is-cam),
+.stage.is-error:not(.is-cam) {
+  aspect-ratio: 16 / 9;
+  min-height: 280px;
+  height: auto;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
 
 .stage video,
 .stage canvas {
@@ -88,8 +100,10 @@
 .stage.is-cam.is-mirror video {
   transform: scaleX(-1);
 }
-/* Never let the demo placeholder sit above the live overlay */
-.stage.is-cam .stage-demo {
+/* Never let the demo placeholder sit above live / starting / error overlays */
+.stage.is-cam .stage-demo,
+.stage.is-starting .stage-demo,
+.stage.is-error .stage-demo {
   display: none !important;
 }
 
@@ -174,9 +188,18 @@
   box-sizing: border-box;
   overflow: visible;
 }
+/* Author display:block overrides the UA [hidden] rule — keep tip truly gone */
+.demo-hint-bar[hidden] {
+  display: none !important;
+}
+/* Hide Demo tip whenever Live is starting, errored, or camera-active */
 .stage.is-cam ~ .demo-hint-bar,
-.stage-card:has(.stage.is-cam) .demo-hint-bar {
-  display: none;
+.stage.is-starting ~ .demo-hint-bar,
+.stage.is-error ~ .demo-hint-bar,
+.stage-card:has(.stage.is-cam) .demo-hint-bar,
+.stage-card:has(.stage.is-starting) .demo-hint-bar,
+.stage-card:has(.stage.is-error) .demo-hint-bar {
+  display: none !important;
 }
 .demo-hint-bar .demo-hint,
 .stage-demo .demo-hint {
