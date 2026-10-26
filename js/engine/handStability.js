@@ -1,6 +1,8 @@
 /* ============================================================
    SignBridge — Hand identity + landmark validity (handStability.js)
-   Pass 5: prefer brief blank over ghost freeze after track loss.
+   Pass 5: prefer blank over multi-second ghost freeze.
+   Pass 6: adaptive hold TTL vs measured infer latency so CPU
+   (~100–170ms) does not expire freshness mid-flight and flicker.
    States: TRACKING | TEMPORARILY_LOST | REACQUIRING | LOST
    ============================================================ */
 
@@ -23,10 +25,35 @@ SB.HAND_BONE_PAIRS = [
   [5, 9], [9, 13], [13, 17],
 ];
 
-/** Max wall-clock to keep a ghost hold (prefer blank after this). */
-SB.HAND_HOLD_TTL_MS = 45;
-/** Misses before LOST (clear overlay + reset). ~1–2 frames at 15–30 infer FPS. */
-SB.HAND_LOST_AFTER_MISSES = 2;
+/**
+ * Adaptive freshness budget (updated from live.js infer stats).
+ * Floor covers ~2 slow CPU frames; cap avoids pass-5 multi-second ghosts.
+ */
+SB.HAND_HOLD_TTL_MIN_MS = 90;
+SB.HAND_HOLD_TTL_MAX_MS = 320;
+SB.HAND_HOLD_TTL_MS = 160; /* current adaptive value */
+SB.HAND_LOST_AFTER_MISSES = 3;
+SB.HAND_HOLD_INFER_MS = 110; /* last measured infer used for budget */
+
+/**
+ * @param {number} inferMs  measured infer latency (prefer p50 / avg)
+ * @returns {{ ttlMs: number, lostAfterMisses: number, inferMs: number }}
+ */
+SB.updateHandHoldBudget = function (inferMs) {
+  var ms = Number(inferMs);
+  if (!isFinite(ms) || ms < 1) ms = SB.HAND_HOLD_INFER_MS || 110;
+  /* max(≈2–3 frames, 1.5×infer + slack) */
+  var ttl = Math.round(Math.max(
+    SB.HAND_HOLD_TTL_MIN_MS,
+    Math.min(SB.HAND_HOLD_TTL_MAX_MS, ms * 1.5 + 45)
+  ));
+  /* Enough misses to ride ~1–2 in-flight detects without LOST */
+  var misses = Math.max(3, Math.min(6, Math.ceil(ttl / Math.max(55, ms * 0.9))));
+  SB.HAND_HOLD_TTL_MS = ttl;
+  SB.HAND_LOST_AFTER_MISSES = misses;
+  SB.HAND_HOLD_INFER_MS = ms;
+  return { ttlMs: ttl, lostAfterMisses: misses, inferMs: ms };
+};
 
 SB._dist2 = function (a, b) {
   var dx = a.x - b.x;
@@ -91,9 +118,10 @@ SB.validateHandShape = function (lms) {
 };
 
 /**
- * Continuity check vs last good. palmJump/scaleJump ⇒ caller should REACQUIRE,
- * not hold the old pose (that caused freeze-at-old-position ghosts).
- * @returns {{ ok: boolean, reason?: string, jump?: number, reacquire?: boolean }}
+ * Continuity check vs last good.
+ * Pass 6: tipJump with palm continuity OK → soft (accept, no REACQUIRE).
+ * Hard palmJump / scaleJump still reacquire (no ghost at old pose).
+ * @returns {{ ok: boolean, reason?: string, jump?: number, reacquire?: boolean, soft?: boolean }}
  */
 SB.validateHandLandmarks = function (lms, lastGood, opts) {
   opts = opts || {};
@@ -104,27 +132,31 @@ SB.validateHandLandmarks = function (lms, lastGood, opts) {
     var c0 = SB.palmCenter(lastGood);
     var c1 = SB.palmCenter(lms);
     var jump = SB._dist(c0, c1);
-    var maxJump = opts.maxPalmJump != null ? opts.maxPalmJump : 0.22;
+    var maxJump = opts.maxPalmJump != null ? opts.maxPalmJump : 0.26;
     if (jump > maxJump) {
       return { ok: false, reason: "palmJump", jump: jump, reacquire: true };
     }
 
     var tipIdx = [4, 8, 12, 16, 20];
     var tipFails = 0;
-    var maxTip = opts.maxTipJump != null ? opts.maxTipJump : 0.55;
+    var maxTip = opts.maxTipJump != null ? opts.maxTipJump : 0.7;
     var scale = SB.handScale(lms);
     for (var t = 0; t < tipIdx.length; t++) {
       var ti = tipIdx[t];
       var td = SB._dist(lms[ti], lastGood[ti]) / scale;
       if (td > maxTip) tipFails++;
     }
-    if (tipFails >= 3) {
+    /* Near face: tips jitter a lot while palm stays put — don't blank/reacq. */
+    if (tipFails >= 4) {
+      if (jump <= maxJump * 0.7) {
+        return { ok: true, reason: "tipJumpSoft", jump: jump, soft: true };
+      }
       return { ok: false, reason: "tipJump", jump: jump, reacquire: true };
     }
 
     var prevScale = SB.handScale(lastGood);
     var scaleRatio = scale / prevScale;
-    if (scaleRatio > 2.4 || scaleRatio < 0.42) {
+    if (scaleRatio > 2.6 || scaleRatio < 0.38) {
       return { ok: false, reason: "scaleJump", reacquire: true };
     }
   }
@@ -144,6 +176,7 @@ SB.HandTrackSlot = function (label, filterOpts) {
   this._goodBuf = [];
   this._rawBuf = [];
   this._prevBuf = [];
+  this._holdUiBuf = [];
   this.palm = null;
   this.misses = 0;
   this.holdFrames = 0;
@@ -155,7 +188,8 @@ SB.HandTrackSlot = function (label, filterOpts) {
   this.status = SB.HAND_STATUS.LOST;
   this.lossCount = 0;
   this.reacquireCount = 0;
-  this.debug = { gated: false, reason: "", jump: 0 };
+  this.clearReason = "";
+  this.debug = { gated: false, reason: "", jump: 0, soft: false };
 };
 
 SB.HandTrackSlot.prototype._copyTo = function (src, buf) {
@@ -170,6 +204,14 @@ SB.HandTrackSlot.prototype._copyTo = function (src, buf) {
   return buf;
 };
 
+SB.HandTrackSlot.prototype.holdTtlMs = function () {
+  return SB.HAND_HOLD_TTL_MS || 160;
+};
+
+SB.HandTrackSlot.prototype.lostAfterMisses = function () {
+  return SB.HAND_LOST_AFTER_MISSES || 3;
+};
+
 SB.HandTrackSlot.prototype.reset = function () {
   this.filter.reset();
   this.lastGood = null;
@@ -181,7 +223,7 @@ SB.HandTrackSlot.prototype.reset = function () {
   this.trackId++;
   this.lastTMs = 0;
   this.status = SB.HAND_STATUS.LOST;
-  this.debug = { gated: false, reason: "", jump: 0 };
+  this.debug = { gated: false, reason: "", jump: 0, soft: false };
 };
 
 /** Hard filter reset without bumping trackId (same logical hand). */
@@ -199,10 +241,10 @@ SB.HandTrackSlot.prototype.landmarkAgeMs = function (nowMs) {
 /**
  * @param {Array|{x,y,z}[]|null} landmarks
  * @param {number} wallMs
- * @returns {{ accepted: boolean, held: boolean, ui: Array|null, status: string, reacquired: boolean }}
+ * @returns {{ accepted: boolean, held: boolean, ui: Array|null, status: string, reacquired: boolean, clearReason?: string }}
  */
 SB.HandTrackSlot.prototype.update = function (landmarks, wallMs) {
-  this.debug = { gated: false, reason: "", jump: 0 };
+  this.debug = { gated: false, reason: "", jump: 0, soft: false };
   this.lastSeenMs = wallMs;
 
   if (!landmarks) {
@@ -218,87 +260,133 @@ SB.HandTrackSlot.prototype.update = function (landmarks, wallMs) {
   /* After loss / first lock: accept any shape-valid pose at the NEW location.
      Never interpolate across empty space — reset filters first. */
   if (wasLost) {
-    var shapeOnly = SB.validateHandShape(landmarks);
-    if (!shapeOnly.ok) {
-      this.debug = { gated: true, reason: shapeOnly.reason || "bad", jump: 0 };
-      return this._onMiss(wallMs, shapeOnly.reason || "bad");
-    }
-    return this._accept(landmarks, wallMs, true);
-  }
-
-  var check = SB.validateHandLandmarks(landmarks, this.lastGood, {
-    maxPalmJump: 0.2,
-    maxTipJump: 0.5,
-  });
-
-  if (!check.ok) {
-    this.debug = {
-      gated: true,
-      reason: check.reason || "bad",
-      jump: check.jump || 0,
-    };
-
-    /* Large discontinuity = hand moved / reappeared elsewhere → REACQUIRE.
-       Holding the old pose here was the freeze/ghost bug. */
-    if (check.reacquire) {
-      var shapeOk = SB.validateHandShape(landmarks);
-      if (shapeOk.ok) {
-        return this._accept(landmarks, wallMs, true);
+    /* TEMPORARILY_LOST with held lastGood: try continuity first (same hand). */
+    if (
+      this.status === SB.HAND_STATUS.TEMPORARILY_LOST &&
+      this.lastGood
+    ) {
+      var cont = SB.validateHandLandmarks(landmarks, this.lastGood, {
+        maxPalmJump: 0.28,
+        maxTipJump: 0.75,
+      });
+      if (cont.ok) {
+        if (cont.soft) {
+          this.debug = { gated: false, reason: cont.reason || "tipJumpSoft", jump: cont.jump || 0, soft: true };
+        }
+        return this._accept(landmarks, wallMs, false);
+      }
+      if (cont.reacquire) {
+        var shapeRe = SB.validateHandShape(landmarks);
+        if (shapeRe.ok) {
+          this.debug = { gated: true, reason: cont.reason || "jump", jump: cont.jump || 0, soft: false };
+          return this._accept(landmarks, wallMs, true);
+        }
       }
     }
 
-    /* Shape garbage (bones/nan): clear quickly — do not freeze last good. */
-    return this._onMiss(wallMs, check.reason || "bad");
+    var shapeOnly = SB.validateHandShape(landmarks);
+    if (!shapeOnly.ok) {
+      this.debug = { gated: true, reason: shapeOnly.reason || "bad", jump: 0, soft: false };
+      return this._onMiss(wallMs, shapeOnly.reason || "bad");
+    }
+    /* First lock from LOST: no filter reacq. Recovery after hold: reacq if we
+       skipped continuity (jumped), else treated above. */
+    return this._accept(
+      landmarks,
+      wallMs,
+      this.status === SB.HAND_STATUS.TEMPORARILY_LOST ||
+        this.status === SB.HAND_STATUS.REACQUIRING
+    );
   }
 
-  return this._accept(landmarks, wallMs, false);
+  var check = SB.validateHandLandmarks(landmarks, this.lastGood, {
+    maxPalmJump: 0.26,
+    maxTipJump: 0.7,
+  });
+
+  if (check.ok) {
+    if (check.soft) {
+      this.debug = { gated: false, reason: check.reason || "tipJumpSoft", jump: check.jump || 0, soft: true };
+    }
+    return this._accept(landmarks, wallMs, false);
+  }
+
+  this.debug = {
+    gated: true,
+    reason: check.reason || "bad",
+    jump: check.jump || 0,
+    soft: false,
+  };
+
+  /* Large discontinuity = hand moved / reappeared elsewhere → REACQUIRE.
+     Holding the old pose here was the freeze/ghost bug. */
+  if (check.reacquire) {
+    var shapeOk = SB.validateHandShape(landmarks);
+    if (shapeOk.ok) {
+      return this._accept(landmarks, wallMs, true);
+    }
+  }
+
+  /* Shape garbage (bones/nan): miss path — may brief-hold then clear. */
+  return this._onMiss(wallMs, check.reason || "bad");
 };
 
 SB.HandTrackSlot.prototype._onMiss = function (wallMs, reason) {
   this.misses++;
   var age = this.landmarkAgeMs(wallMs);
+  var ttl = this.holdTtlMs();
+  var maxMiss = this.lostAfterMisses();
 
-  /* At most one brief hold frame, and only within HOLD_TTL_MS of last accept. */
-  if (
-    this.misses === 1 &&
+  /*
+   * Pass 6: while a detect is in-flight, age often exceeds the old 45ms TTL
+   * but is still < adaptive TTL. Hold last fresh landmarks briefly (TRACKING
+   * → TEMPORARILY_LOST) so the skeleton does not flicker every slow frame.
+   * Clear only when age/misses prove the hand left (or long miss).
+   */
+  var canHold =
     this.lastGood &&
-    age <= SB.HAND_HOLD_TTL_MS &&
-    this.status === SB.HAND_STATUS.TRACKING
-  ) {
+    age <= ttl &&
+    this.misses < maxMiss &&
+    (this.status === SB.HAND_STATUS.TRACKING ||
+      this.status === SB.HAND_STATUS.TEMPORARILY_LOST ||
+      this.status === SB.HAND_STATUS.REACQUIRING);
+
+  if (canHold) {
     this.status = SB.HAND_STATUS.TEMPORARILY_LOST;
     this.holdFrames++;
-    /* Return null UI — prefer blank flash over ghost. Keep lastGood for reacquire match. */
+    this.clearReason = "";
+    var holdUi =
+      (this.uiBuf && this.uiBuf.length >= 21)
+        ? this._copyTo(this.uiBuf, this._holdUiBuf)
+        : this._copyTo(this.lastGood, this._holdUiBuf);
     return {
       accepted: false,
-      held: false,
-      ui: null,
+      held: true,
+      ui: holdUi,
       status: this.status,
       reacquired: false,
+      clearReason: "",
     };
   }
 
-  if (this.misses >= SB.HAND_LOST_AFTER_MISSES || age > SB.HAND_HOLD_TTL_MS) {
-    if (this.status !== SB.HAND_STATUS.LOST) {
-      this.lossCount++;
-    }
-    this.reset();
-    this.status = SB.HAND_STATUS.LOST;
-    return {
-      accepted: false,
-      held: false,
-      ui: null,
-      status: this.status,
-      reacquired: false,
-    };
+  /* Truly lost — blank, reset filters (no multi-second ghost). */
+  var why = reason || "lost";
+  if (age > ttl) why = why + "/ttl";
+  else if (this.misses >= maxMiss) why = why + "/miss";
+  this.clearReason = why;
+  if (this.status !== SB.HAND_STATUS.LOST) {
+    this.lossCount++;
   }
-
-  this.status = SB.HAND_STATUS.TEMPORARILY_LOST;
+  this.reset();
+  this.status = SB.HAND_STATUS.LOST;
+  this.clearReason = why;
   return {
     accepted: false,
     held: false,
     ui: null,
     status: this.status,
     reacquired: false,
+    clearReason: why,
   };
 };
 
@@ -313,6 +401,7 @@ SB.HandTrackSlot.prototype._accept = function (landmarks, wallMs, reacquire) {
 
   this.misses = 0;
   this.holdFrames = 0;
+  this.clearReason = "";
 
   if (!reacquire && this.lastRaw) {
     this.prevRaw = this._copyTo(this.lastRaw, this._prevBuf);
@@ -336,6 +425,7 @@ SB.HandTrackSlot.prototype._accept = function (landmarks, wallMs, reacquire) {
     ui: ui,
     status: this.status,
     reacquired: !!reacquire,
+    clearReason: "",
   };
 };
 

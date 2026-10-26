@@ -168,6 +168,9 @@ SB.LiveEngine = function () {
     handR: "LOST",
     ageL: 0,
     ageR: 0,
+    holdTtlMs: SB.HAND_HOLD_TTL_MS || 160,
+    lostAfter: SB.HAND_LOST_AFTER_MISSES || 3,
+    clearWhy: "",
   };
   var camFrameCount = 0;
   var inferFrameCount = 0;
@@ -195,7 +198,7 @@ SB.LiveEngine = function () {
 
   function ringStats(ring, n) {
     var count = Math.min(n, LAT_RING);
-    if (!count) return { avg: 0, p95: 0 };
+    if (!count) return { avg: 0, p95: 0, p50: 0 };
     var tmp = [];
     var sum = 0;
     var start = n > LAT_RING ? n % LAT_RING : 0;
@@ -205,8 +208,22 @@ SB.LiveEngine = function () {
       sum += v;
     }
     tmp.sort(function (a, b) { return a - b; });
+    var p50 = tmp[Math.min(tmp.length - 1, Math.floor(0.5 * (tmp.length - 1)))];
     var p95 = tmp[Math.min(tmp.length - 1, Math.floor(0.95 * (tmp.length - 1)))];
-    return { avg: sum / count, p95: p95 };
+    return { avg: sum / count, p50: p50, p95: p95 };
+  }
+
+  function refreshHoldBudget() {
+    var inf = ringStats(inferLatRing, inferLatN);
+    var ms = inf.p50 || inf.avg || stats.inferMs || 110;
+    if (typeof SB.updateHandHoldBudget === "function") {
+      var b = SB.updateHandHoldBudget(ms);
+      stats.holdTtlMs = b.ttlMs;
+      stats.lostAfter = b.lostAfterMisses;
+    } else {
+      stats.holdTtlMs = SB.HAND_HOLD_TTL_MS || 160;
+      stats.lostAfter = SB.HAND_LOST_AFTER_MISSES || 3;
+    }
   }
 
   // ----------------------------------------------------------
@@ -256,7 +273,7 @@ SB.LiveEngine = function () {
     return new Promise(function (resolve, reject) {
       try {
         /* Classic worker: MediaPipe WASM uses importScripts (blocked in module workers). */
-        worker = new Worker("js/engine/handWorker.js");
+        worker = new Worker("js/engine/handWorker.js?v=20261026p6");
       } catch (err) {
         reject(err);
         return;
@@ -384,6 +401,7 @@ SB.LiveEngine = function () {
       inferFrameCount++;
       ringPush(inferLatRing, _inferIdx, stats.inferMs);
       inferLatN = _inferIdx.i;
+      refreshHoldBudget();
       if (msg.wallSentMs != null) {
         stats.e2eMs = Math.max(0, now - msg.wallSentMs);
         ringPush(e2eLatRing, _e2eIdx, stats.e2eMs);
@@ -726,6 +744,9 @@ SB.LiveEngine = function () {
     stats.handR = "LOST";
     stats.ageL = 0;
     stats.ageR = 0;
+    stats.clearWhy = "";
+    stats.holdTtlMs = SB.HAND_HOLD_TTL_MS || 160;
+    stats.lostAfter = SB.HAND_LOST_AFTER_MISSES || 3;
     inferLatN = e2eLatN = confirmLatN = 0;
     _inferIdx.i = _e2eIdx.i = _confirmIdx.i = 0;
     gpuProbeDone = false;
@@ -915,6 +936,7 @@ SB.LiveEngine = function () {
       inferFrameCount++;
       ringPush(inferLatRing, _inferIdx, stats.inferMs);
       inferLatN = _inferIdx.i;
+      refreshHoldBudget();
       ringPush(e2eLatRing, _e2eIdx, stats.e2eMs);
       e2eLatN = _e2eIdx.i;
       tunePredictFromE2e(stats.e2eMs);
@@ -1008,7 +1030,6 @@ SB.LiveEngine = function () {
     if (leftSlot.debug.gated) stats.gated++;
     if (rightSlot.debug.gated) stats.gated++;
     if (leftUp.reacquired || rightUp.reacquired) stats.jumps++;
-    /* holds counter kept for HUD — pass 5 almost always clears (held=false) */
     if (leftUp.held) stats.holds++;
     if (rightUp.held) stats.holds++;
     if (leftUp.reacquired) stats.reacquires++;
@@ -1018,14 +1039,23 @@ SB.LiveEngine = function () {
     stats.handR = rightSlot.status;
     stats.ageL = leftSlot.lastTMs ? leftSlot.landmarkAgeMs(wallMs) : 0;
     stats.ageR = rightSlot.lastTMs ? rightSlot.landmarkAgeMs(wallMs) : 0;
+    stats.clearWhy =
+      leftSlot.clearReason || rightSlot.clearReason ||
+      (leftUp.clearReason || "") || (rightUp.clearReason || "") ||
+      stats.clearWhy;
 
     prevRaw.left = leftSlot.prevRaw;
     prevRaw.right = rightSlot.prevRaw;
     prevRaw.tMs = rawHands.tMs;
 
-    /* Only currently TRACKING accepted poses — never ghost-hold into raw/predict */
-    rawHands.left = leftUp.accepted ? leftSlot.lastRaw : null;
-    rawHands.right = rightUp.accepted ? rightSlot.lastRaw : null;
+    /* Accepted = live raw; brief TEMPORARILY_LOST hold keeps last raw for draw
+       but never feeds prediction velocity (prev stays frozen). */
+    rawHands.left = leftUp.accepted
+      ? leftSlot.lastRaw
+      : (leftUp.held ? leftSlot.lastRaw : null);
+    rawHands.right = rightUp.accepted
+      ? rightSlot.lastRaw
+      : (rightUp.held ? rightSlot.lastRaw : null);
     rawHands.tMs = wallMs;
     rawHands.mediaMs = mediaMs;
 
@@ -1212,9 +1242,10 @@ SB.LiveEngine = function () {
 
     /*
      * Modest lead only while TRACKING with fresh landmarks.
-     * Never extrapolate a TEMPORARILY_LOST / LOST / stale hand.
+     * TEMPORARILY_LOST may draw last held pose (no predict) within adaptive TTL.
+     * Never extrapolate LOST / stale hands (no multi-second ghost).
      */
-    var freshMs = SB.HAND_HOLD_TTL_MS || 45;
+    var freshMs = stats.holdTtlMs || SB.HAND_HOLD_TTL_MS || 160;
     paintLeadSec = Math.min(
       0.05,
       Math.max(predictSec, stats.frameAgeMs / 1000 * 0.35 + predictSec * 0.5)
@@ -1222,16 +1253,19 @@ SB.LiveEngine = function () {
 
     function drawSlot(slot, ui, raw, prev, label) {
       if (!ui) return;
-      if (slot.status !== SB.HAND_STATUS.TRACKING) return;
+      var st = slot.status;
+      var tracking = st === SB.HAND_STATUS.TRACKING;
+      var holding = st === SB.HAND_STATUS.TEMPORARILY_LOST;
+      if (!tracking && !holding) return;
       var age = slot.landmarkAgeMs(now);
-      if (!isFinite(age) || age > freshMs * 2) return; /* freshness TTL */
+      if (!isFinite(age) || age > freshMs) return; /* adaptive freshness TTL */
 
       var dtSec = 1 / 30;
       if (prev && raw && slot.lastTMs && prevRaw.tMs) {
         dtSec = Math.max(1e-3, (rawHands.tMs - prevRaw.tMs) / 1000);
       }
-      /* No prediction across reacquire (prevRaw null) or when aging out */
-      var lead = (prev && age < freshMs) ? paintLeadSec : 0;
+      /* Predict only while actively TRACKING and still fresh; holds are static */
+      var lead = (tracking && prev && age < freshMs * 0.55) ? paintLeadSec : 0;
       var drawn = predictHand(ui, raw, prev, dtSec, lead, slot.predBuf);
       if (drawn) drawHand(ctx, drawn, label, false);
     }
@@ -1395,14 +1429,17 @@ SB.LiveEngine = function () {
       " · Lead " + (paintLeadSec * 1000).toFixed(0) + "ms" +
       " · Draw " + stats.renderFps.toFixed(0) +
       " · Age " + stats.frameAgeMs.toFixed(0) + "ms" +
+      " · TTL " + (stats.holdTtlMs | 0) + "ms×" + (stats.lostAfter | 0) +
       " · Drop " + stats.dropped +
       (stats.timeouts ? " · TO " + stats.timeouts : "") +
       " · L " + shortStatus(stats.handL) + "@" + Math.min(999, stats.ageL | 0) + "ms" +
       " · R " + shortStatus(stats.handR) + "@" + Math.min(999, stats.ageR | 0) + "ms" +
       " · Gate " + stats.gated +
+      " · Hold " + stats.holds +
       " · Jump " + stats.jumps +
       " · Loss " + stats.losses +
       " · Reacq " + stats.reacquires +
+      (stats.clearWhy ? " · Clr " + stats.clearWhy : "") +
       (stats.stale ? " · Stale " + stats.stale : "") +
       (stats.pendingKicks ? " · Pend " + stats.pendingKicks : "") +
       (stats.swapsBlocked ? " · SwapBlk " + stats.swapsBlocked : "") +

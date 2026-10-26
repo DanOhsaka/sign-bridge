@@ -70,10 +70,11 @@ function buildHandOpts(delegate) {
     },
     runningMode: "VIDEO",
     numHands: 2,
-    /* Slightly higher detect threshold → fewer palm-search retries once tracking. */
-    minHandDetectionConfidence: 0.5,
+    /* Detect a bit stricter; keep tracking lower so face-edge flicker
+       does not flip presence every frame (pass 6 hysteresis). */
+    minHandDetectionConfidence: 0.55,
     minHandPresenceConfidence: 0.5,
-    minTrackingConfidence: 0.5,
+    minTrackingConfidence: 0.4,
   };
 }
 
