@@ -9,10 +9,26 @@
      • confidence is visible on every word (coloured underline)
      • low-confidence words unfold alternates inline
      • source badge (Demo/Live) shown once for the stream
+     • optional per-word timestamps + live-word pulse
      • aria-live so screen readers announce signing
    ============================================================ */
 
 window.SB = window.SB || {};
+
+SB._TX_EMPTY_HTML =
+  '<div class="empty tx-empty">' +
+  '<div class="empty-title">Waiting for signs</div>' +
+  '<div class="empty-hint">Words stream here as one growing sentence. Press ' +
+  '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live.</div>' +
+  "</div>";
+
+function SB_formatClock(d) {
+  var h = d.getHours();
+  var m = d.getMinutes();
+  var s = d.getSeconds();
+  var pad = function (n) { return n < 10 ? "0" + n : String(n); };
+  return pad(h) + ":" + pad(m) + ":" + pad(s);
+}
 
 /* Transcript manages one <div class="transcript"> container. */
 SB.Transcript = function (container, opts) {
@@ -25,6 +41,43 @@ SB.Transcript = function (container, opts) {
   var sentence = null;
   var sourceEl = null;
   var pendingBreak = false;
+  var lastWordEl = null;
+  var startedAt = null;
+
+  function setWorkspaceStatus(mode, live) {
+    var status = document.getElementById("txStatus");
+    var dot = document.getElementById("txLiveDot");
+    if (status) {
+      status.textContent = mode || "Idle";
+      status.classList.toggle("is-live", !!live);
+      status.classList.toggle("is-active", mode === "Streaming" || mode === "Live");
+    }
+    if (dot) {
+      dot.classList.toggle("is-on", !!live || mode === "Streaming");
+    }
+  }
+
+  function updateCurrentSign(tok) {
+    var word = document.getElementById("txCurrentWord");
+    var conf = document.getElementById("txCurrentConf");
+    var time = document.getElementById("txCurrentTime");
+    var panel = document.getElementById("txCurrent");
+    if (!word) return;
+    if (!tok || !tok.text) {
+      word.textContent = "—";
+      word.className = "tx-current-word";
+      if (conf) conf.textContent = "";
+      if (time) time.textContent = "";
+      if (panel) panel.classList.remove("has-sign");
+      return;
+    }
+    var label = (tok.glyph ? tok.glyph + " " : "") + tok.text;
+    word.textContent = label;
+    word.className = "tx-current-word " + SB.confClass(tok.conf);
+    if (conf) conf.textContent = SB.confPct(tok.conf);
+    if (time) time.textContent = SB_formatClock(new Date());
+    if (panel) panel.classList.add("has-sign");
+  }
 
   function ensureStream(tok) {
     if (!stream) {
@@ -36,13 +89,21 @@ SB.Transcript = function (container, opts) {
       meta.className = "stream-meta";
       sourceEl = document.createElement("span");
       sourceEl.className = "stream-src src-" + (tok.source || "demo");
-      sourceEl.textContent = tok.source === "live" ? "● Live" : "● Demo";
+      sourceEl.textContent = tok.source === "live" || tok.source === "lstm"
+        ? "● Live"
+        : "● Demo";
       meta.appendChild(sourceEl);
 
       var hint = document.createElement("span");
       hint.className = "stream-hint";
-      hint.textContent = "streaming";
+      hint.innerHTML = '<span class="live-word-pip" aria-hidden="true"></span> streaming';
       meta.appendChild(hint);
+
+      if (!startedAt) startedAt = new Date();
+      var clock = document.createElement("span");
+      clock.className = "stream-clock";
+      clock.textContent = "Started " + SB_formatClock(startedAt);
+      meta.appendChild(clock);
 
       sentence = document.createElement("p");
       sentence.className = "stream-sentence is-streaming";
@@ -51,9 +112,16 @@ SB.Transcript = function (container, opts) {
       stream.appendChild(meta);
       stream.appendChild(sentence);
       el.appendChild(stream);
+      setWorkspaceStatus("Streaming", tok.source === "live" || tok.source === "lstm");
     } else if (sourceEl && tok.source) {
       sourceEl.className = "stream-src src-" + tok.source;
-      sourceEl.textContent = tok.source === "live" ? "● Live" : "● Demo";
+      sourceEl.textContent = tok.source === "live" || tok.source === "lstm"
+        ? "● Live"
+        : "● Demo";
+      setWorkspaceStatus(
+        tok.source === "live" || tok.source === "lstm" ? "Live" : "Streaming",
+        tok.source === "live" || tok.source === "lstm"
+      );
     }
     return sentence;
   }
@@ -81,20 +149,30 @@ SB.Transcript = function (container, opts) {
     var text = raw.replace(/\s+/g, " ").trim();
     if (!text) return;
 
+    var now = new Date();
     var span = document.createElement("span");
-    span.className = "word " + SB.confClass(tok.conf);
+    span.className = "word is-live-word " + SB.confClass(tok.conf);
     span.dataset.conf = tok.conf;
     span.dataset.text = text;
+    span.dataset.ts = String(now.getTime());
     var label = (tok.glyph ? tok.glyph + " " : "") + text;
     /* trailing space so words read as a natural sentence */
     span.appendChild(document.createTextNode(label + " "));
-    span.title = "Confidence " + SB.confPct(tok.conf);
+    span.title = "Confidence " + SB.confPct(tok.conf) + " · " + SB_formatClock(now);
     span.setAttribute("tabindex", "0");
 
     var val = document.createElement("span");
     val.className = "conf-val";
     val.textContent = SB.confPct(tok.conf);
     span.appendChild(val);
+
+    var ts = document.createElement("span");
+    ts.className = "word-ts";
+    ts.textContent = SB_formatClock(now);
+    span.appendChild(ts);
+
+    if (lastWordEl) lastWordEl.classList.remove("is-live-word");
+    lastWordEl = span;
 
     /* low confidence → unfold alternates under the word (inline) */
     if (tok.alt && tok.alt.length && tok.conf < 0.8) {
@@ -117,9 +195,11 @@ SB.Transcript = function (container, opts) {
           while (span.firstChild) span.removeChild(span.firstChild);
           span.appendChild(document.createTextNode(a + " "));
           span.appendChild(val);
-          span.className = "word " + SB.confClass(0.95);
-          span.title = "Confirmed manually";
+          span.appendChild(ts);
+          span.className = "word is-live-word " + SB.confClass(0.95);
+          span.title = "Confirmed manually · " + SB_formatClock(now);
           altRow.remove();
+          updateCurrentSign({ text: a, conf: 0.95, glyph: tok.glyph });
         });
         altRow.appendChild(btn);
       });
@@ -129,6 +209,8 @@ SB.Transcript = function (container, opts) {
       sentence.appendChild(span);
     }
 
+    updateCurrentSign(tok);
+
     /* keep the newest word in view */
     el.scrollTop = el.scrollHeight;
     if (opts.onToken) opts.onToken(tok);
@@ -137,6 +219,7 @@ SB.Transcript = function (container, opts) {
   /* mark a soft pause between phrases — does NOT open a new card */
   self.endUtterance = function () {
     if (sentence && sentence.querySelector(".word")) pendingBreak = true;
+    if (lastWordEl) lastWordEl.classList.remove("is-live-word");
   };
 
   self.bubbleText = function () {
@@ -144,26 +227,54 @@ SB.Transcript = function (container, opts) {
   };
 
   self.clear = function () {
-    el.innerHTML =
-      '<div class="empty">' +
-      '<div class="empty-icon">🗣️</div>' +
-      'Press <span class="kbd">1</span>–<span class="kbd">9</span>, click a phrase, or hit ' +
-      "<em>Watch a live demo</em> — everything streams here as a sentence, word by word." +
-      "</div>";
+    el.innerHTML = SB._TX_EMPTY_HTML;
     stream = null;
     sentence = null;
     sourceEl = null;
     pendingBreak = false;
+    lastWordEl = null;
+    startedAt = null;
+    updateCurrentSign(null);
+    setWorkspaceStatus("Idle", false);
   };
 
   self.allText = function () {
     if (!sentence) return "";
     return SB.$$(".word", sentence)
       .map(function (w) { return w.dataset.text || w.textContent; })
-      .join(" ");
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
   };
 
+  self.downloadText = function (filename) {
+    var text = self.allText();
+    if (!text) return false;
+    var stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    var name = filename || ("signbridge-transcript-" + stamp + ".txt");
+    var header = "SignBridge Live Transcript\n" +
+      "Exported " + new Date().toLocaleString() + "\n" +
+      "----------------------------------------\n\n";
+    var blob = new Blob([header + text + "\n"], { type: "text/plain;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    return true;
+  };
+
+  self.setCurrentSign = updateCurrentSign;
+  self.setStatus = setWorkspaceStatus;
+
   self.speakAll = function () { SB.speak(self.allText()); };
+
+  /* initial workspace chrome */
+  setWorkspaceStatus("Idle", false);
+  updateCurrentSign(null);
 };
 
 /* Shared "last sign" spotlight on the translate page */

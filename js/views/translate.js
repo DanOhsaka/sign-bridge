@@ -378,6 +378,7 @@ SB.TranslateView = function () {
 
     setPill("demo");
     refreshCapturePanelVisibility();
+    if (transcript && transcript.setStatus) transcript.setStatus("Idle", false);
   }
 
   function goLive() {
@@ -420,6 +421,7 @@ SB.TranslateView = function () {
       setPill("live");
       refreshCapturePanelVisibility();
       if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
+      if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
 
       SB.toast(live().hasClassifier()
         ? "Live engine on â€” hand tracking + your classifier"
@@ -558,6 +560,16 @@ SB.TranslateView = function () {
       if (!text) { SB.toast("Nothing to copy yet", "info"); return; }
       SB.copyText(text);
     });
+    var dl = SB.$("#tDownload");
+    if (dl) {
+      dl.addEventListener("click", function () {
+        if (!transcript.downloadText()) {
+          SB.toast("Nothing to download yet", "info");
+          return;
+        }
+        SB.toast("Transcript downloaded", "ok");
+      });
+    }
     SB.$("#tSpeak").addEventListener("click", function () {
       var text = transcript.allText();
       if (!text) { SB.toast("Nothing to speak yet", "info"); return; }

@@ -232,7 +232,8 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
 }
 .empty .empty-hint { color: var(--text-3); font-size: var(--fs-sm); max-width: 34ch; }
 
-.transcript-card .empty { min-height: 280px; }
+.transcript-card .empty,
+.transcript-card .tx-empty { min-height: 0; }
 
 /* Camera / stage states */
 .stage {
