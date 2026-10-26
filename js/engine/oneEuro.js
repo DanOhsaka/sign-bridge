@@ -75,12 +75,12 @@ SB._MID_IDX = { 3: 1, 6: 1, 7: 1, 10: 1, 11: 1, 14: 1, 15: 1, 18: 1, 19: 1 };
  */
 SB.HandLandmarkFilter = function (opts) {
   opts = opts || {};
-  /* Tuned for shape stability: responsive but less tip overshoot than pass-2. */
-  this.palmMinCutoff = opts.minCutoff == null ? 1.9 : opts.minCutoff;
-  this.palmBeta = opts.beta == null ? 1.05 : opts.beta;
-  this.tipMinCutoff = opts.tipMinCutoff == null ? 2.55 : opts.tipMinCutoff;
-  this.tipBeta = opts.tipBeta == null ? 1.55 : opts.tipBeta;
-  this.dCutoff = opts.dCutoff == null ? 1.05 : opts.dCutoff;
+  /* Pass 7: snappy tips + calm palm (between pass-2 glue and pass-3 stability). */
+  this.palmMinCutoff = opts.minCutoff == null ? 2.25 : opts.minCutoff;
+  this.palmBeta = opts.beta == null ? 1.3 : opts.beta;
+  this.tipMinCutoff = opts.tipMinCutoff == null ? 3.15 : opts.tipMinCutoff;
+  this.tipBeta = opts.tipBeta == null ? 2.05 : opts.tipBeta;
+  this.dCutoff = opts.dCutoff == null ? 1.1 : opts.dCutoff;
   this.includeZ = !!opts.includeZ;
   this.minCutoff = this.palmMinCutoff;
   this.beta = this.palmBeta;
@@ -180,9 +180,10 @@ SB.HandLandmarkFilter.prototype.apply = function (tSec, landmarks, out) {
     var tx = tip.x - (fTip.x.xPrev != null ? fTip.x.xPrev : tip.x);
     var ty = tip.y - (fTip.y.xPrev != null ? fTip.y.xPrev : tip.y);
     var speed = Math.sqrt(wx * wx + wy * wy + tx * tx + ty * ty) / dt;
-    if (speed > 2.2) this._speedBoost = 0.65;
-    else if (speed > 1.0) this._speedBoost = 0.35;
-    else if (speed > 0.45) this._speedBoost = 0.15;
+    /* Engage boost earlier so fast hand motion doesn't lag the filter */
+    if (speed > 1.8) this._speedBoost = 0.75;
+    else if (speed > 0.85) this._speedBoost = 0.42;
+    else if (speed > 0.35) this._speedBoost = 0.18;
     else this._speedBoost = 0;
     this._applyParams();
   }
