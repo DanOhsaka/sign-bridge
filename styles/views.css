@@ -107,7 +107,7 @@
   display: none !important;
 }
 
-/* Live tracking latency / FPS HUD (dev-facing, corner of stage) */
+/* Live tracking latency / FPS HUD — opt-in only (?perf=1 / Settings). */
 .track-hud {
   position: absolute;
   left: 10px;
@@ -126,6 +126,9 @@
   white-space: normal;
   overflow: hidden;
   word-break: break-word;
+}
+.track-hud[hidden] {
+  display: none !important;
 }
 [data-theme="light"] .track-hud {
   color: rgba(20, 28, 44, 0.9);

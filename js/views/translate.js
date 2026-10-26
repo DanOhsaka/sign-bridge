@@ -387,6 +387,7 @@ SB.TranslateView = function () {
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
 
+    /* Perf HUD never auto-on with Live — only Settings / ?perf=1 / ?debugTrack=1 */
     var wantHud = !!(SB.settings && SB.settings.perfHud);
     try {
       wantHud = wantHud || /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(location.search || "");
@@ -396,7 +397,7 @@ SB.TranslateView = function () {
       canvasEl: SB.$("#overlay"),
       mirror: SB.settings.mirror,
       drawLandmarks: SB.settings.landmarks !== false,
-      showHud: wantHud,
+      showHud: !!wantHud,
     }).then(function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");

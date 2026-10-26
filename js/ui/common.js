@@ -24,7 +24,7 @@ SB.DEFAULTS = {
   speakLang: "en",        // BCP-47 primary tag for TTS output language
   rate: 1,
   reduceMotion: false,
-  perfHud: false,         // Live tracking FPS/latency overlay (also ?perf=1)
+  perfHud: false,         // Opt-in FPS/latency HUD only (?perf=1 / Settings)
   mode: "demo",
 };
 

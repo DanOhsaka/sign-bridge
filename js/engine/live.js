@@ -67,20 +67,46 @@ SB.LiveEngine = function () {
 
   var mirror = true;
   var drawLandmarksEnabled = true;
-  /* Dev overlay — off by default; ?perf=1 | ?debugTrack=1 | settings.perfHud */
+  /*
+   * Perf HUD — OFF by default. Never auto-show just because Live started.
+   * Opt-in only: ?perf=1 | ?debugTrack=1 | Settings → Perf monitor.
+   */
   var showHud = false;
   try {
     var q = (typeof location !== "undefined" && location.search) || "";
-    showHud = /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(q);
     showDebugTrack = /(?:^|[?&])debugTrack=1(?:&|$)/.test(q);
-    if (showDebugTrack) showHud = true;
     forceCpu = /(?:^|[?&])forceCpu=1(?:&|$)/.test(q);
     forceHolistic = /(?:^|[?&])holistic=1(?:&|$)/.test(q);
-    if (!showHud && typeof SB !== "undefined" && SB.settings && SB.settings.perfHud) {
-      showHud = true;
-    }
   } catch (e) {}
   modelKind = forceHolistic ? "holistic" : "hands";
+
+  function queryWantsPerfHud() {
+    try {
+      var s = (typeof location !== "undefined" && location.search) || "";
+      return /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(s);
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** Resolve HUD visibility — Live never implies on. */
+  function resolveShowHud(opts) {
+    opts = opts || {};
+    if (opts.showHud != null) return !!opts.showHud;
+    if (queryWantsPerfHud()) return true;
+    return !!(typeof SB !== "undefined" && SB.settings && SB.settings.perfHud);
+  }
+
+  function hideTrackHudEl() {
+    var el = document.getElementById("trackHud");
+    if (!el) return;
+    el.hidden = true;
+    el.textContent = "";
+    el.removeAttribute("data-armed");
+    el.setAttribute("aria-hidden", "true");
+  }
+
+  showHud = resolveShowHud({});
 
   /* Latest measured hands (recognition) + UI hands (filtered/predicted) */
   var rawHands = { left: null, right: null, tMs: 0, mediaMs: 0 };
@@ -128,6 +154,7 @@ SB.LiveEngine = function () {
   var gpuHealthyFrames = 0;
   var gpuStallStrikes = 0;
   var gpuRetryPending = false;
+  var gpuRetryCount = 0;
 
   /* Latest-frame pending: when busy, remember newest cam time; kick on release */
   var pendingKick = null;
@@ -379,16 +406,17 @@ SB.LiveEngine = function () {
   }
 
   function scheduleGpuRetry() {
-    if (forceCpu || gpuRetryPending) return;
+    /* Stickiness: one soft GPU retry after fallback (not a thrash loop). */
+    if (forceCpu || gpuRetryPending || gpuRetryCount >= 1) return;
     gpuRetryPending = true;
     setTimeout(function () {
       gpuRetryPending = false;
       if (!running || forceCpu || preferGpu) return;
-      /* Retry whenever CPU e2e is still laggy — stick to GPU when it works. */
       if (stats.inferFps < 4) return;
       if (stats.e2eMsAvg > 0 && stats.e2eMsAvg < 55) return;
+      gpuRetryCount++;
       console.log("Retrying GPU HandLandmarker after CPU fallback…");
-      gpuFallbackTried = false; /* allow another fallback if retry stalls */
+      gpuFallbackTried = false;
       preferGpu = true;
       gpuProbeDone = false;
       gpuHealthyFrames = 0;
@@ -413,7 +441,6 @@ SB.LiveEngine = function () {
           return initWorker().then(function () {
             stats.backend = "worker/CPU/" + modelKind + "(fallback)";
             releaseBusy(true);
-            scheduleGpuRetry(); /* keep trying periodically */
           });
         });
     }, 5000);
@@ -640,11 +667,7 @@ SB.LiveEngine = function () {
 
   self.setShowHud = function (on) {
     showHud = !!on;
-    var el = document.getElementById("trackHud");
-    if (el && !showHud) {
-      el.hidden = true;
-      el.setAttribute("aria-hidden", "true");
-    }
+    if (!showHud) hideTrackHudEl();
   };
 
   self.getShowHud = function () {
@@ -688,8 +711,9 @@ SB.LiveEngine = function () {
     overlayCtx = null;
     mirror = opts.mirror !== false;
     drawLandmarksEnabled = opts.drawLandmarks !== false;
-    if (opts.showHud != null) showHud = !!opts.showHud;
-    else if (SB.settings && SB.settings.perfHud) showHud = true;
+    /* Re-resolve every start — Live alone never turns the HUD on. */
+    showHud = resolveShowHud(opts);
+    if (!showHud) hideTrackHudEl();
 
     if (!videoEl || !canvasEl) {
 
@@ -761,8 +785,7 @@ SB.LiveEngine = function () {
     teardownStream();
     clearCanvas();
     resetTrackingState();
-    var hud = document.getElementById("trackHud");
-    if (hud) hud.hidden = true;
+    hideTrackHudEl();
     state = "off";
     console.log("Camera stopped.");
   };
@@ -1488,11 +1511,7 @@ SB.LiveEngine = function () {
     var el = document.getElementById("trackHud");
     if (!el) return;
     if (!showHud) {
-      if (!el.hidden) {
-        el.hidden = true;
-        el.textContent = "";
-        el.setAttribute("aria-hidden", "true");
-      }
+      hideTrackHudEl();
       return;
     }
     /* Only rewrite DOM on the stats tick — Age was flickering every frame */
