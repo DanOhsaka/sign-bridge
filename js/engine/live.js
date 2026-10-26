@@ -95,39 +95,38 @@ SB.LiveEngine = function () {
   var leftCloneFlip = false;
   var rightCloneFlip = false;
 
-  /* Pass 7: snappier One Euro — tips glue to motion, palm stays calm. */
+  /* Pass 8: minimum lag — tip glue near pass-2, palm still filtered. */
   var FILTER_OPTS = {
-    minCutoff: 2.25, beta: 1.3, tipMinCutoff: 3.15, tipBeta: 2.05, dCutoff: 1.1,
+    minCutoff: 2.6, beta: 1.55, tipMinCutoff: 3.6, tipBeta: 2.55, dCutoff: 1.15,
   };
   var leftSlot = new SB.HandTrackSlot("L", FILTER_OPTS);
   var rightSlot = new SB.HandTrackSlot("R", FILTER_OPTS);
   var drawPtsBuf = [];
 
-  /* Latency compensation — capped so prediction can't spaghetti the skeleton. */
-  var predictSec = 0.028;
-  var maxPredictNorm = 0.06;
-  var paintLeadSec = 0.028;
+  /* Latency compensation — aggressive lead, hard clamp (no spaghetti). */
+  var predictSec = 0.024;
+  var maxPredictNorm = 0.065;
+  var paintLeadSec = 0.024;
 
   /*
-   * Adaptive infer width: start modest, drop if e2e/FPS miss target.
-   * Display/overlay always uses full video resolution.
-   * Pass 7: GPU starts lean (360) so first detects finish before watchdog,
-   * then ramps to 416 when healthy; CPU 320 / low 288.
+   * Adaptive infer width. Pass 8 floor: stay small for throughput.
+   * GPU start 288 → max 360 when healthy; CPU 288; low 240.
    */
-  var INFER_MAX_W_GPU = 416;
-  var INFER_MAX_W_GPU_START = 360;
-  var INFER_MAX_W_CPU = 320;
-  var INFER_MAX_W_LOW = 288;
+  var INFER_MAX_W_GPU = 360;
+  var INFER_MAX_W_GPU_START = 288;
+  var INFER_MAX_W_CPU = 288;
+  var INFER_MAX_W_LOW = 240;
   var INFER_MAX_W = INFER_MAX_W_GPU_START;
-  var TARGET_INFER_FPS = 22;
-  var TARGET_E2E_MS = 85;
+  var TARGET_INFER_FPS = 28;
+  var TARGET_E2E_MS = 70;
 
   /* Busy-gate watchdog — GPU can hang on some headless/SwiftShader hosts. */
-  var INFER_WATCHDOG_MS = 600;
-  var GPU_PROBE_MS = 1400; /* first HandLandmarker GPU frame can be cold */
+  var INFER_WATCHDOG_MS = 550;
+  var GPU_PROBE_MS = 1600; /* cold first frame; stickiness forgives 1 stall after healthy */
   var gpuProbeDone = false;
   var gpuFallbackTried = false;
   var gpuHealthyFrames = 0;
+  var gpuStallStrikes = 0;
   var gpuRetryPending = false;
 
   /* Latest-frame pending: when busy, remember newest cam time; kick on release */
@@ -279,7 +278,7 @@ SB.LiveEngine = function () {
     return new Promise(function (resolve, reject) {
       try {
         /* Classic worker: MediaPipe WASM uses importScripts (blocked in module workers). */
-        worker = new Worker("js/engine/handWorker.js?v=20261026p7");
+        worker = new Worker("js/engine/handWorker.js?v=20261026p8");
       } catch (err) {
         reject(err);
         return;
@@ -346,6 +345,7 @@ SB.LiveEngine = function () {
     gpuFallbackTried = true;
     preferGpu = false;
     gpuHealthyFrames = 0;
+    gpuStallStrikes = 0;
     applyInferCap();
     /* CPU path: start at low res immediately for FPS after a GPU stall. */
     INFER_MAX_W = INFER_MAX_W_LOW;
@@ -384,14 +384,15 @@ SB.LiveEngine = function () {
     setTimeout(function () {
       gpuRetryPending = false;
       if (!running || forceCpu || preferGpu) return;
-      /* Only retry if CPU path is producing frames and e2e is still high. */
-      if (stats.inferFps < 6) return;
-      if (stats.e2eMsAvg > 0 && stats.e2eMsAvg < 70) return;
+      /* Retry whenever CPU e2e is still laggy — stick to GPU when it works. */
+      if (stats.inferFps < 4) return;
+      if (stats.e2eMsAvg > 0 && stats.e2eMsAvg < 55) return;
       console.log("Retrying GPU HandLandmarker after CPU fallback…");
       gpuFallbackTried = false; /* allow another fallback if retry stalls */
       preferGpu = true;
       gpuProbeDone = false;
       gpuHealthyFrames = 0;
+      gpuStallStrikes = 0;
       applyInferCap();
       workerReady = false;
       useWorker = false;
@@ -412,14 +413,15 @@ SB.LiveEngine = function () {
           return initWorker().then(function () {
             stats.backend = "worker/CPU/" + modelKind + "(fallback)";
             releaseBusy(true);
+            scheduleGpuRetry(); /* keep trying periodically */
           });
         });
-    }, 12000);
+    }, 5000);
   }
 
   function tunePredictFromE2e(e2eMs) {
-    /* Pass 7: slightly firmer lead vs e2e so overlay stays glued between detects */
-    predictSec = Math.min(0.055, Math.max(0.016, e2eMs / 1000 * 0.45));
+    /* Pass 8: lead tracks measured e2e hard (still capped; clamp kills spaghetti) */
+    predictSec = Math.min(0.07, Math.max(0.012, e2eMs / 1000 * 0.6));
   }
 
   function onWorkerMessage(ev) {
@@ -459,7 +461,10 @@ SB.LiveEngine = function () {
         tunePredictFromE2e(stats.e2eMs);
       }
       if (!gpuProbeDone) gpuProbeDone = true;
-      if (preferGpu && !gpuFallbackTried) gpuHealthyFrames++;
+      if (preferGpu && !gpuFallbackTried) {
+        gpuHealthyFrames++;
+        gpuStallStrikes = 0;
+      }
       try {
         ingestResults(
           {
@@ -703,9 +708,9 @@ SB.LiveEngine = function () {
       .then(function () {
         return navigator.mediaDevices.getUserMedia({
           video: {
-            /* Pass 7: leaner capture → less downscale work before detect */
-            width: { ideal: 480, max: 1280 },
-            height: { ideal: 270, max: 720 },
+            /* Pass 8: smallest practical capture for min downscale/infer cost */
+            width: { ideal: 320, max: 960 },
+            height: { ideal: 180, max: 540 },
             frameRate: { ideal: 30, max: 30 },
           },
           audio: false,
@@ -803,6 +808,7 @@ SB.LiveEngine = function () {
     _inferIdx.i = _e2eIdx.i = _confirmIdx.i = 0;
     gpuProbeDone = false;
     gpuHealthyFrames = 0;
+    gpuStallStrikes = 0;
   }
 
   // ----------------------------------------------------------
@@ -867,10 +873,9 @@ SB.LiveEngine = function () {
     pendingKick = null;
     pendingKickCount++;
     stats.pendingKicks = pendingKickCount;
-    queueMicrotask(function () {
-      if (!running || inferenceBusy) return;
-      runInference(p.now, p.mediaMs);
-    });
+    /* Pass 8: kick sync — max latest-frame throughput (no microtask gap). */
+    if (!running || inferenceBusy) return;
+    runInference(p.now, p.mediaMs);
   }
 
   function clearInferWatchdog() {
@@ -889,7 +894,12 @@ SB.LiveEngine = function () {
 
   function armInferWatchdog(wallSentMs) {
     clearInferWatchdog();
+    /* Stickiness: after healthy GPU frames, give cold/slow frames more room
+       before tearing down the worker (true hangs still fall back). */
     var limit = watchdogLimitMs();
+    if (preferGpu && !gpuFallbackTried && gpuHealthyFrames >= 12) {
+      limit = Math.max(limit, INFER_WATCHDOG_MS + 350);
+    }
     busySinceMs = wallSentMs;
     inferWatchdog = setTimeout(function () {
       if (!inferenceBusy || !running) return;
@@ -897,6 +907,7 @@ SB.LiveEngine = function () {
       stats.dropped++;
       inferWatchdog = null;
       if (preferGpu && !gpuFallbackTried) {
+        gpuStallStrikes++;
         releaseBusy(false);
         fallbackWorkerToCpu("watchdog " + limit + "ms");
       } else {
@@ -909,9 +920,13 @@ SB.LiveEngine = function () {
   function maybeWatchdog(now) {
     if (!inferenceBusy) return;
     var limit = watchdogLimitMs();
+    if (preferGpu && !gpuFallbackTried && gpuHealthyFrames >= 12) {
+      limit = Math.max(limit, INFER_WATCHDOG_MS + 350);
+    }
     if (busySinceMs && now - busySinceMs > limit + 50) {
       stats.timeouts++;
       if (preferGpu && !gpuFallbackTried) {
+        gpuStallStrikes++;
         releaseBusy(false);
         fallbackWorkerToCpu("busy age");
       } else {
@@ -1004,28 +1019,14 @@ SB.LiveEngine = function () {
     };
 
     /*
-     * Prefer one-step resize from the video element. Fall back to
-     * drawImage→bitmap if video bitmap hangs (seen on some fakes).
+     * Pass 8: always drawImage→bitmap (predictable, no 100ms video-bitmap race).
+     * Latest-frame wins; pending kick is sync in releaseBusy.
      */
+    inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
     if (typeof createImageBitmap === "function" && useWorker) {
-      var fromVideo = createImageBitmap(videoEl, {
-        resizeWidth: targetW,
-        resizeHeight: targetH,
-        resizeQuality: "low",
-      });
-      Promise.race([
-        fromVideo,
-        new Promise(function (_, reject) {
-          setTimeout(function () { reject(new Error("bitmap timeout")); }, 100);
-        }),
-      ])
-        .catch(function () {
-          inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
-          return createImageBitmap(canvas);
-        })
+      createImageBitmap(canvas)
         .then(sendInput)
         .catch(function () {
-          inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
           if (landmarker) sendInput(null);
           else {
             stats.dropped++;
@@ -1033,7 +1034,6 @@ SB.LiveEngine = function () {
           }
         });
     } else {
-      inferCtx.drawImage(videoEl, 0, 0, targetW, targetH);
       sendInput(null);
     }
   }
@@ -1249,7 +1249,8 @@ SB.LiveEngine = function () {
       var vy = (raw[i].y - prev[i].y) / dtSec;
       /* Clamp velocity in norm-units/sec to kill tip teleport prediction */
       var spd = Math.sqrt(vx * vx + vy * vy);
-      var maxSpd = SB._TIP_IDX && SB._TIP_IDX[i] ? 2.8 : 2.2;
+      /* Pass 8: tighter tip clamp — more lead, less spaghetti */
+      var maxSpd = SB._TIP_IDX && SB._TIP_IDX[i] ? 2.35 : 2.0;
       if (spd > maxSpd) {
         vx = (vx / spd) * maxSpd;
         vy = (vy / spd) * maxSpd;
@@ -1295,15 +1296,14 @@ SB.LiveEngine = function () {
     if (!isFinite(stats.frameAgeMs)) stats.frameAgeMs = 0;
 
     /*
-     * Pass 7: light prediction within adaptive TTL for TRACKING and brief holds
-     * so the skeleton keeps moving between detects. Fade lead as age→TTL.
-     * Never extrapolate LOST / past-TTL (Pass 5/6 no-ghost rule).
-     * Never blank while holding inside TTL — always draw last fresh UI.
+     * Pass 8: max lead within adaptive TTL (age-weighted), hard velocity clamp.
+     * Fade as age→TTL. Never extrapolate LOST / past-TTL (P5/P6 no-ghost).
+     * Never blank while holding inside TTL.
      */
     var freshMs = stats.holdTtlMs || SB.HAND_HOLD_TTL_MS || 160;
     paintLeadSec = Math.min(
-      0.055,
-      Math.max(predictSec, stats.frameAgeMs / 1000 * 0.4 + predictSec * 0.55)
+      0.07,
+      Math.max(predictSec, stats.frameAgeMs / 1000 * 0.6 + predictSec * 0.7)
     );
 
     function drawSlot(slot, ui, raw, prev, label) {
@@ -1321,13 +1321,13 @@ SB.LiveEngine = function () {
       }
       var lead = 0;
       if (prev && age < freshMs) {
-        /* Fade prediction toward TTL so holds don't spaghetti into ghosts */
         var fade = 1 - age / Math.max(freshMs, 1);
+        /* Keep most of the lead while fresh; fade only near TTL edge */
+        var edge = fade * fade; /* stay snappy early in the TTL window */
         if (tracking) {
-          lead = paintLeadSec * (0.45 + 0.55 * fade);
+          lead = paintLeadSec * (0.55 + 0.45 * edge);
         } else if (holding) {
-          /* Lighter coast between detects — keep skeleton alive, not extrapolated far */
-          lead = Math.min(predictSec * 0.7, paintLeadSec * 0.55) * fade;
+          lead = paintLeadSec * 0.75 * edge;
         }
       }
       var drawn = predictHand(ui, raw, prev, dtSec, lead, slot.predBuf);
