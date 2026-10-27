@@ -294,10 +294,11 @@ button { font-family: inherit; }
 .nav a:hover { color: var(--text); background: var(--surface-3); text-decoration: none; }
 .nav a.active {
   background: var(--grad);
-  color: #030712;
+  color: #041018;
   box-shadow: 0 2px 12px rgba(45,212,191,.35);
 }
-[data-theme="light"] .nav a.active { color: #fff; }
+/* Dark-ink on gradient pill (pill layer may own the fill) */
+[data-theme="light"] .nav a.active { color: #041018; }
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 
@@ -926,17 +927,21 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 }
 .icon-btn[data-tip]:hover::after { opacity: 1; transform: translateX(-50%) scale(1); }
 
-/* nav sliding pill */
+/* nav sliding pill — duration owned by polish --sb-nav-dur */
 .nav { position: relative; }
 .nav-pill {
   position: absolute; top: 4px; bottom: 4px; border-radius: 999px;
-  background: var(--grad); box-shadow: 0 2px 14px rgba(45,212,191,.4);
-  transition: left var(--t-med) var(--ease), width var(--t-med) var(--ease);
+  background: var(--grad);
+  box-shadow: 0 0 0 1px rgba(45,212,191,.28), 0 2px 14px rgba(45,212,191,.4);
+  transition:
+    left var(--sb-nav-dur, var(--t-med)) var(--sb-theme-ease, var(--ease)),
+    width var(--sb-nav-dur, var(--t-med)) var(--sb-theme-ease, var(--ease));
   z-index: 0; pointer-events: none;
 }
 .nav a { position: relative; z-index: 1; }
-.nav a.active { color: #030712 !important; }
-[data-theme="light"] .nav a.active { color: #fff !important; }
+.nav a.active { color: #041018 !important; }
+/* Keep dark-ink on gradient pill in light theme (matches theme switch) */
+[data-theme="light"] .nav a.active { color: #041018 !important; }
 
 /* segmented track */
 .segmented { position: relative; overflow: visible; }
@@ -1015,8 +1020,8 @@ input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.15); }
 [data-theme="light"] .btn-blur:hover { background:rgba(0,0,0,.08); }
 [data-theme="light"] .chip.is-on,
 [data-theme="light"] .chip.on { border-color:rgba(13,148,136,.5); box-shadow:0 0 0 1px rgba(13,148,136,.25),0 0 16px rgba(13,148,136,.15); }
-/* Active theme labels stay dark-ink on the gradient pill (both themes) */
-[data-theme="light"] .nav a.active { color: #fff !important; }
+/* Active nav label stays dark-ink on the gradient pill (both themes) */
+[data-theme="light"] .nav a.active { color: #041018 !important; }
 [data-theme="light"] .seg-track { background: var(--surface); box-shadow: none; }
 [data-theme="light"] .spotlight-word { text-shadow:0 0 30px rgba(13,148,136,.3); }
 [data-theme="light"] .btn-border-magic::after { background:var(--surface-2); }

@@ -5,36 +5,96 @@
    a11y targets, semantic badges.
    ============================================================ */
 
-/* Cross-document view transitions (Chrome 126+) — keeps shell feeling persistent */
+/* Cross-document view transitions — same cadence as theme switch */
 @view-transition { navigation: auto; }
 
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation-duration: 180ms;
-  animation-timing-function: cubic-bezier(.16, 1, .3, 1);
-}
-
-.topbar { view-transition-name: sb-topbar; }
-.view { view-transition-name: sb-view; }
-
-/* Page content enter (fallback + complement) */
-.view {
-  animation: sbPageIn 200ms cubic-bezier(.16, 1, .3, 1) both;
-}
-@keyframes sbPageIn {
-  from { opacity: 0; transform: translateY(6px); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* Controlled theme property transitions (not `transition: all`) */
 html {
   color-scheme: dark;
   --sb-theme-dur: 320ms;
   --sb-theme-ease: cubic-bezier(.16, 1, .3, 1);
+  --sb-nav-dur: var(--sb-theme-dur);
 }
 html[data-theme="light"] { color-scheme: light; }
 html.sb-theme-changing {
   --sb-theme-dur: 380ms;
+}
+
+/* Persistent shell + atmosphere; content fades/slides */
+.topbar { view-transition-name: sb-topbar; }
+.nav { view-transition-name: sb-nav; }
+.view { view-transition-name: sb-view; }
+.sb-three-bg { view-transition-name: sb-atmosphere; }
+
+::view-transition-group(sb-topbar),
+::view-transition-group(sb-nav),
+::view-transition-group(sb-atmosphere) {
+  animation-duration: var(--sb-nav-dur);
+  animation-timing-function: var(--sb-theme-ease);
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: var(--sb-nav-dur);
+  animation-timing-function: var(--sb-theme-ease);
+}
+
+/* Default: soft fade + rise (matches theme feel) */
+::view-transition-old(sb-view) {
+  animation: sbViewOut var(--sb-nav-dur) var(--sb-theme-ease) both;
+}
+::view-transition-new(sb-view) {
+  animation: sbViewIn var(--sb-nav-dur) var(--sb-theme-ease) both;
+}
+
+/* Directional slide when navigating Translate ↔ Practice ↔ Learn */
+html[data-nav-dir="1"]::view-transition-old(sb-view) {
+  animation-name: sbViewOutFwd;
+}
+html[data-nav-dir="1"]::view-transition-new(sb-view) {
+  animation-name: sbViewInFwd;
+}
+html[data-nav-dir="-1"]::view-transition-old(sb-view) {
+  animation-name: sbViewOutBack;
+}
+html[data-nav-dir="-1"]::view-transition-new(sb-view) {
+  animation-name: sbViewInBack;
+}
+
+@keyframes sbViewOut {
+  to { opacity: 0; transform: translateY(-8px) scale(0.985); }
+}
+@keyframes sbViewIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sbViewOutFwd {
+  to { opacity: 0; transform: translateX(-22px) scale(0.99); }
+}
+@keyframes sbViewInFwd {
+  from { opacity: 0; transform: translateX(22px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes sbViewOutBack {
+  to { opacity: 0; transform: translateX(22px) scale(0.99); }
+}
+@keyframes sbViewInBack {
+  from { opacity: 0; transform: translateX(-22px) scale(0.99); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Page enter fallback (browsers without cross-doc VT) */
+.view {
+  animation: sbPageIn var(--sb-nav-dur) var(--sb-theme-ease) both;
+}
+@keyframes sbPageIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+@supports (view-transition-name: none) {
+  @media (prefers-reduced-motion: no-preference) {
+    /* VT owns the enter; avoid double-animating .view */
+    .view { animation: none; }
+  }
 }
 
 body,
@@ -141,7 +201,7 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   -webkit-backdrop-filter: blur(14px) saturate(1.15);
 }
 
-/* Nav: clearer active + stronger inactive contrast */
+/* Nav: polished segmented control (same cadence as theme switch) */
 .nav {
   position: relative;
   padding: 4px;
@@ -153,26 +213,49 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   bottom: 4px;
   border-radius: 999px;
   background: var(--grad);
-  box-shadow: 0 4px 16px -6px rgba(45, 212, 191, 0.55);
-  transition: left 220ms cubic-bezier(.16,1,.3,1), width 220ms cubic-bezier(.16,1,.3,1);
+  box-shadow:
+    0 0 0 1px rgba(45, 212, 191, 0.28),
+    0 4px 16px -6px rgba(45, 212, 191, 0.55);
+  transition:
+    left var(--sb-nav-dur) var(--sb-theme-ease),
+    width var(--sb-nav-dur) var(--sb-theme-ease),
+    box-shadow var(--sb-nav-dur) var(--sb-theme-ease);
   z-index: 0;
   pointer-events: none;
+}
+/* Prefer single pill — hide BeUI duplicate when #navPill is present */
+.nav:has(#navPill) > .be-pill {
+  display: none !important;
 }
 .nav a {
   position: relative;
   z-index: 1;
-  color: var(--text-2);
+  color: var(--text-3);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
   padding: 8px 16px;
+  transition:
+    color var(--sb-nav-dur) var(--sb-theme-ease),
+    background-color var(--sb-nav-dur) var(--sb-theme-ease),
+    transform 180ms var(--sb-theme-ease);
 }
-.nav a:hover { color: var(--text); background: transparent; }
+.nav a:hover {
+  color: var(--text);
+  background: transparent;
+  transform: translateY(-0.5px);
+}
 .nav a.active {
-  color: #04121a !important;
+  color: #041018 !important;
   background: transparent !important;
   font-weight: 700;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.16);
+  box-shadow: none !important;
 }
-[data-theme="light"] .nav a.active { color: #fff !important; }
+/* Active label stays dark-ink on the gradient pill in both themes */
+[data-theme="light"] .nav a.active {
+  color: #041018 !important;
+}
 
 /* Topbar actions: de-emphasize utilities vs primary nav */
 .topbar-actions .chip {
@@ -572,12 +655,27 @@ html.reduce-motion {
   --sb-theme-dur: 0.01ms;
 }
 @media (prefers-reduced-motion: reduce) {
+  @view-transition { navigation: none; }
   .view { animation: none; }
   ::view-transition-old(root),
-  ::view-transition-new(root) { animation: none; }
-  html { --sb-theme-dur: 0.01ms; }
+  ::view-transition-new(root),
+  ::view-transition-old(sb-view),
+  ::view-transition-new(sb-view),
+  ::view-transition-old(sb-topbar),
+  ::view-transition-new(sb-topbar),
+  ::view-transition-old(sb-nav),
+  ::view-transition-new(sb-nav),
+  ::view-transition-old(sb-atmosphere),
+  ::view-transition-new(sb-atmosphere) {
+    animation: none !important;
+  }
+  html {
+    --sb-theme-dur: 0.01ms;
+    --sb-nav-dur: 0.01ms;
+  }
   html.sb-theme-changing .sb-three-bg { opacity: 1; }
-  .ts-pill {
+  .ts-pill,
+  .nav-pill {
     transition: none !important;
   }
   body,

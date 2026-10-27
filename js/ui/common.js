@@ -368,7 +368,14 @@ SB.initCommon = function () {
     navEl.insertBefore(pillEl, navEl.firstChild);
   }
 
-  /* nav sliding pill */
+  /* active nav state BEFORE first pill measure */
+  var view = document.body.getAttribute("data-view");
+  SB.$$(".nav a[data-nav]").forEach(function (a) {
+    a.classList.toggle("active", a.getAttribute("data-nav") === view);
+  });
+
+  /* nav sliding pill — same duration as theme via CSS --sb-nav-dur */
+  SB._navOrder = { translate: 0, practice: 1, learn: 2 };
   SB._movePill = function () {
     var active = SB.$(".nav a.active");
     var pill   = SB.$("#navPill");
@@ -385,17 +392,38 @@ SB.initCommon = function () {
   });
   window.addEventListener("resize", SB._movePill);
 
-  /* Soft MPA navigation via View Transitions when available */
-  SB.$$(".nav a[data-nav], .logo").forEach(function (a) {
+  /* MPA nav: stash direction for cross-doc View Transitions, then let
+     `@view-transition { navigation: auto }` run (do NOT preventDefault —
+     that broke Live/Three teardown and skipped the browser VT path). */
+  SB.$$(".nav a[data-nav]").forEach(function (a) {
     a.addEventListener("click", function (e) {
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank") return;
-      if (!document.startViewTransition) return;
+      if (SB.prefersReducedMotion && SB.prefersReducedMotion()) return;
       var href = a.getAttribute("href");
       if (!href || href.charAt(0) === "#") return;
-      e.preventDefault();
-      document.startViewTransition(function () {
-        window.location.href = a.href;
-      });
+      var to = a.getAttribute("data-nav");
+      var from = document.body.getAttribute("data-view") || "";
+      if (to === from) {
+        e.preventDefault();
+        return;
+      }
+      var fromI = SB._navOrder[from];
+      var toI = SB._navOrder[to];
+      var dir = "0";
+      if (typeof fromI === "number" && typeof toI === "number" && toI !== fromI) {
+        dir = toI > fromI ? "1" : "-1";
+      }
+      try {
+        sessionStorage.setItem("sb.navDir", dir);
+        sessionStorage.setItem("sb.navFrom", from);
+        sessionStorage.setItem("sb.navTo", to || "");
+      } catch (err) {}
+      document.documentElement.setAttribute("data-nav-dir", dir);
+      /* Soft-pause Three during nav so the VT snapshot stays cheap;
+         next page remounts atmosphere fresh. Live cam ends with unload. */
+      if (SB.pauseThreeFX) {
+        try { SB.pauseThreeFX(); } catch (err2) {}
+      }
     });
   });
 
@@ -429,13 +457,7 @@ SB.initCommon = function () {
     if (e.key === "Escape") SB.closeDrawer();
   });
 
-  SB.applyTheme();
-
-  /* active nav state */
-  var view = document.body.getAttribute("data-view");
-  SB.$$(".nav a[data-nav]").forEach(function (a) {
-    if (a.getAttribute("data-nav") === view) a.classList.add("active");
-  });
+  SB.applyTheme({ animate: false });
 
   if (SB.paintAuthSlot) SB.paintAuthSlot();
 

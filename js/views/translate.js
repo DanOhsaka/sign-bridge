@@ -188,6 +188,17 @@ SB.TranslateView = function () {
     bindDemoActions();
     bindTranscriptActions();
     bindCapturePanel();
+    /* Release camera / worker cleanly when navigating Translate → other pages */
+    window.addEventListener("pagehide", function () {
+      try {
+        if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.stop === "function") {
+          window.SignBridgeLiveTest.stop();
+        }
+      } catch (e) {}
+      try {
+        if (live().getState && live().getState() !== "off") live().stop();
+      } catch (e2) {}
+    });
     setPill("demo");
     refreshCapturePanelVisibility();
     /* Reflect saved toggle state even before Live starts. */
