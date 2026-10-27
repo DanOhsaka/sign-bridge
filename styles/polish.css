@@ -29,8 +29,13 @@
 /* Controlled theme property transitions (not `transition: all`) */
 html {
   color-scheme: dark;
+  --sb-theme-dur: 320ms;
+  --sb-theme-ease: cubic-bezier(.16, 1, .3, 1);
 }
 html[data-theme="light"] { color-scheme: light; }
+html.sb-theme-changing {
+  --sb-theme-dur: 380ms;
+}
 
 body,
 .card,
@@ -38,14 +43,33 @@ body,
 .btn, .btn-grad, .btn-blur, .btn-ghost, .btn-soft,
 .chip, .input, .select, .icon-btn, .engine-pill,
 .nav, .segmented, .stage, .spotlight, .stat, .param,
-.sign-card, .phrase-card, .letter-pad button, .feedback {
+.sign-card, .phrase-card, .letter-pad button, .feedback,
+.stage-card, .transcript-card, .arena, .etiquette,
+.auth-welcome, .auth-form-card, .quick-phrases, .demo-hint-bar,
+.spell-strip, .stage-status, .tx-head, .tx-actions, .tx-current,
+.stream-panel, .drawer, .toast, .theme-switch .ts-track {
   transition:
-    background-color 180ms ease,
-    background 180ms ease,
-    border-color 180ms ease,
-    color 180ms ease,
-    box-shadow 180ms ease,
-    opacity 180ms ease;
+    background-color var(--sb-theme-dur) var(--sb-theme-ease),
+    background var(--sb-theme-dur) var(--sb-theme-ease),
+    border-color var(--sb-theme-dur) var(--sb-theme-ease),
+    color var(--sb-theme-dur) var(--sb-theme-ease),
+    box-shadow var(--sb-theme-dur) var(--sb-theme-ease),
+    opacity var(--sb-theme-dur) var(--sb-theme-ease),
+    fill var(--sb-theme-dur) var(--sb-theme-ease),
+    stroke var(--sb-theme-dur) var(--sb-theme-ease);
+}
+
+/* Soft wash behind the UI also eases with theme */
+body::before {
+  transition: opacity var(--sb-theme-dur) var(--sb-theme-ease);
+}
+
+/* Three canvas: avoid layout thrash — only opacity easing while tokens flip */
+.sb-three-bg {
+  transition: opacity 280ms var(--sb-theme-ease);
+}
+html.sb-theme-changing .sb-three-bg {
+  opacity: 0.92;
 }
 
 /* Stronger elevation separation (dark) */
@@ -540,10 +564,31 @@ html.reduce-motion *::after {
   animation-duration: .01ms !important;
   animation-iteration-count: 1 !important;
 }
+html.reduce-motion .ts-pill,
+html.reduce-motion.sb-theme-changing .sb-three-bg {
+  transition: none !important;
+}
+html.reduce-motion {
+  --sb-theme-dur: 0.01ms;
+}
 @media (prefers-reduced-motion: reduce) {
   .view { animation: none; }
   ::view-transition-old(root),
   ::view-transition-new(root) { animation: none; }
+  html { --sb-theme-dur: 0.01ms; }
+  html.sb-theme-changing .sb-three-bg { opacity: 1; }
+  .ts-pill {
+    transition: none !important;
+  }
+  body,
+  .card,
+  .topbar,
+  .stage-card,
+  .transcript-card,
+  .sb-three-bg,
+  body::before {
+    transition: none !important;
+  }
 }
 
 /* Responsive: practice / learn / translate */

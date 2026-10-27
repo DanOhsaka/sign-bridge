@@ -465,6 +465,22 @@ html.sb-has-three body::before {
 #stage {
   isolation: isolate;
 }
+/* Theme-aware surfaces ease with polish --sb-theme-dur (avoid layout thrash) */
+.stage-card,
+.transcript-card,
+.arena,
+.etiquette,
+.auth-welcome,
+.auth-form-card,
+#stage {
+  transition:
+    background-color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    background var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    border-color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    box-shadow var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1));
+}
+
 /* Dark panels stay readable but leave edge bleed for Three atmosphere.
    Translate used to force a full-viewport opaque transcript slab — avoid that. */
 html[data-theme="dark"] .view--translate {
