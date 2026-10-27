@@ -28,6 +28,15 @@ window.SB = window.SB || {};
   var clock = null;
   var reduce = false;
   var pointer = { x: 0, y: 0, tx: 0, ty: 0, bound: false };
+  /* Smooth dark↔light color blend for atmosphere (avoids hard snap/jank) */
+  var themeBlend = {
+    active: false,
+    t0: 0,
+    durMs: 360,
+    from: null,
+    to: null,
+    cur: null,
+  };
 
   function shouldReduce() {
     if (SB.settings && SB.settings.reduceMotion) return true;
@@ -128,7 +137,13 @@ window.SB = window.SB || {};
     clock = new THREE.Clock();
     function tick() {
       raf = requestAnimationFrame(tick);
-      if (paused || reduce || document.hidden) return;
+      if (paused || reduce || document.hidden) {
+        /* Still finish theme blend so colors settle while paused */
+        if (themeBlend.active) tickThemeBlend(performance.now());
+        return;
+      }
+      var now = performance.now();
+      if (themeBlend.active) tickThemeBlend(now);
       var t = clock.getElapsedTime();
       for (var i = 0; i < scenes.length; i++) {
         var s = scenes[i];
@@ -150,6 +165,43 @@ window.SB = window.SB || {};
     return light
       ? { teal: 0x0d9488, violet: 0x7c3aed, deep: 0xf2f5fd }
       : { teal: 0x2dd4bf, violet: 0xa78bfa, deep: 0x060a14 };
+  }
+
+  function lerpChannel(a, b, t) {
+    return ((a + (b - a) * t) | 0);
+  }
+
+  function lerpHex(a, b, t) {
+    var ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
+    var br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
+    return (lerpChannel(ar, br, t) << 16) | (lerpChannel(ag, bg, t) << 8) | lerpChannel(ab, bb, t);
+  }
+
+  function lerpBrand(from, to, t) {
+    return {
+      teal: lerpHex(from.teal, to.teal, t),
+      violet: lerpHex(from.violet, to.violet, t),
+      deep: lerpHex(from.deep, to.deep, t),
+    };
+  }
+
+  function applyBrandToScenes(c) {
+    themeBlend.cur = c;
+    for (var i = 0; i < scenes.length; i++) {
+      if (scenes[i].syncTheme) scenes[i].syncTheme(c);
+    }
+  }
+
+  function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function tickThemeBlend(now) {
+    if (!themeBlend.active || !themeBlend.from || !themeBlend.to) return;
+    var u = Math.min(1, (now - themeBlend.t0) / themeBlend.durMs);
+    var e = easeOutCubic(u);
+    applyBrandToScenes(lerpBrand(themeBlend.from, themeBlend.to, e));
+    if (u >= 1) themeBlend.active = false;
   }
 
   /* ---------- Full-bleed background ---------- */
@@ -282,8 +334,8 @@ window.SB = window.SB || {};
         points.rotation.y = t * 0.015;
         points2.rotation.y = -t * 0.012;
       },
-      syncTheme: function () {
-        var c = brandColors();
+      syncTheme: function (c) {
+        c = c || brandColors();
         waveMat.color.setHex(c.teal);
         wave2.material.color.setHex(c.violet);
         pMat.color.setHex(c.teal);
@@ -296,6 +348,7 @@ window.SB = window.SB || {};
     sizeRenderer(entry, vp0.w, vp0.h);
     bindResize(entry, wrap);
     scenes.push(entry);
+    themeBlend.cur = colors;
 
     /* Dim CSS beams/spotlight so Three owns the atmosphere */
     document.documentElement.classList.add("sb-has-three");
@@ -371,8 +424,8 @@ window.SB = window.SB || {};
         ring2.rotation.z = -t * 0.4 * speed;
         sphere.scale.setScalar(1 + Math.sin(t * 1.2 * speed) * 0.04);
       },
-      syncTheme: function () {
-        var c = brandColors();
+      syncTheme: function (c) {
+        c = c || brandColors();
         sphere.material.color.setHex(c.teal);
         ring.material.color.setHex(c.violet);
         ring2.material.color.setHex(c.teal);
@@ -555,8 +608,8 @@ window.SB = window.SB || {};
         pts.rotation.y = t * 0.12;
         pts2.rotation.y = -t * 0.08;
       },
-      syncTheme: function () {
-        var c = brandColors();
+      syncTheme: function (c) {
+        c = c || brandColors();
         mat.color.setHex(c.teal);
         mat2.color.setHex(c.violet);
         glow.material.color.setHex(c.teal);
@@ -571,9 +624,20 @@ window.SB = window.SB || {};
   }
 
   function syncAllThemes() {
-    for (var i = 0; i < scenes.length; i++) {
-      if (scenes[i].syncTheme) scenes[i].syncTheme();
+    var to = brandColors();
+    if (shouldReduce()) {
+      themeBlend.active = false;
+      applyBrandToScenes(to);
+      return;
     }
+    themeBlend.from = themeBlend.cur || brandColors();
+    /* If mid-blend, continue from current interpolated color */
+    if (themeBlend.active && themeBlend.cur) themeBlend.from = themeBlend.cur;
+    themeBlend.to = to;
+    themeBlend.t0 = performance.now();
+    themeBlend.active = true;
+    /* Ensure loop runs so blend advances even if paused for other reasons */
+    if (!running) startLoop();
   }
 
   function applyMotionPolicy() {

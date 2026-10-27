@@ -14,8 +14,102 @@ SB.TranslateView = function () {
   var spotlight = null;
   var lastPrediction = null;
   var lastPredictionTime = 0;
+  /* Adaptive confirm: high-confidence static glosses commit faster. */
+  var pending = null; /* { text, conf, source, firstMs, lastMs } */
+  var confirmTimer = null;
 
   function live() { return SB.Engine.getLiveEngine(); }
+
+  function debounceMsFor(conf) {
+    conf = typeof conf === "number" ? conf : 0;
+    if (conf >= 0.9) return 450;
+    if (conf >= 0.75) return 900;
+    return 1600;
+  }
+
+  function holdMsFor(conf) {
+    conf = typeof conf === "number" ? conf : 0;
+    /* High-confidence static signs: short hold; lower conf needs longer stability. */
+    if (conf >= 0.9) return 120;
+    if (conf >= 0.8) return 220;
+    if (conf >= 0.7) return 350;
+    return 500;
+  }
+
+  function commitToken(tok, waitedMs) {
+    if (!tok || !tok.text) return;
+    var now = Date.now();
+    var textKey = String(tok.text).trim().toLowerCase();
+    if (
+      textKey &&
+      textKey === lastPrediction &&
+      now - lastPredictionTime < debounceMsFor(tok.conf)
+    ) {
+      return;
+    }
+    lastPrediction = textKey;
+    lastPredictionTime = now;
+    transcript.addToken(tok);
+    spotlight.show(tok);
+    try {
+      var eng = live();
+      if (eng && eng.noteConfirmMs) eng.noteConfirmMs(waitedMs || 0);
+    } catch (e) {}
+  }
+
+  function clearPending() {
+    pending = null;
+    if (confirmTimer != null) {
+      clearTimeout(confirmTimer);
+      confirmTimer = null;
+    }
+  }
+
+  function considerLiveToken(tok) {
+    if (!tok || !tok.text) return;
+    var now = performance.now();
+    var text = String(tok.text).trim();
+    var conf = typeof tok.conf === "number" ? tok.conf : 0;
+    var hold = holdMsFor(conf);
+
+    if (pending && pending.text === text) {
+      pending.lastMs = now;
+      pending.conf = Math.max(pending.conf, conf);
+      if (now - pending.firstMs >= holdMsFor(pending.conf)) {
+        var waited = now - pending.firstMs;
+        var out = {
+          text: pending.text,
+          conf: pending.conf,
+          alt: tok.alt,
+          glyph: tok.glyph,
+          source: tok.source || pending.source || "live",
+        };
+        clearPending();
+        commitToken(out, waited);
+      }
+      return;
+    }
+
+    clearPending();
+    pending = {
+      text: text,
+      conf: conf,
+      source: tok.source || "live",
+      firstMs: now,
+      lastMs: now,
+    };
+    confirmTimer = setTimeout(function () {
+      if (!pending || pending.text !== text) return;
+      var waited = performance.now() - pending.firstMs;
+      var out = {
+        text: pending.text,
+        conf: pending.conf,
+        source: pending.source,
+      };
+      clearPending();
+      commitToken(out, waited);
+    }, hold + 16);
+  }
 
   function init() {
     transcript = new SB.Transcript(SB.$("#transcript"));
@@ -23,8 +117,7 @@ SB.TranslateView = function () {
 
     SB.Engine.on("result", function (tok) {
       if (SB.Engine.getMode() === "live") {
-        transcript.addToken(tok);
-        spotlight.show(tok);
+        considerLiveToken(tok);
         /* keep one continuous sentence — do not open a new card per word */
       }
     });
@@ -45,30 +138,16 @@ SB.TranslateView = function () {
           return;
         }
 
-        var now = Date.now();
-              
-        if (
-          result.prediction === lastPrediction &&
-          now - lastPredictionTime < 2000
-        ) {
-          return;
-        }
-        
-        lastPrediction = result.prediction;
-        lastPredictionTime = now;
-
-        var token = {
+        considerLiveToken({
           text: result.prediction,
-          conf: result.confidence
-        };
-
-        transcript.addToken(token);
-        spotlight.show(token);
-        /* keep one continuous sentence — do not open a new card per word */
+          conf: result.confidence,
+          source: "lstm",
+        });
 
         console.log(
-          "SignBridge transcript updated:",
-          token.text
+          "SignBridge transcript candidate:",
+          result.prediction,
+          result.confidence
         );
       }
     );
@@ -109,6 +188,17 @@ SB.TranslateView = function () {
     bindDemoActions();
     bindTranscriptActions();
     bindCapturePanel();
+    /* Release camera / worker cleanly when navigating Translate → other pages */
+    window.addEventListener("pagehide", function () {
+      try {
+        if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.stop === "function") {
+          window.SignBridgeLiveTest.stop();
+        }
+      } catch (e) {}
+      try {
+        if (live().getState && live().getState() !== "off") live().stop();
+      } catch (e2) {}
+    });
     setPill("demo");
     refreshCapturePanelVisibility();
     /* Reflect saved toggle state even before Live starts. */
@@ -245,6 +335,19 @@ SB.TranslateView = function () {
     });
   }
 
+  function setDemoEmptyVisible(show) {
+    var demo = SB.$("#stageDemo");
+    var hint = SB.$("#demoHintBar");
+    if (demo) {
+      demo.style.display = show ? "" : "none";
+      demo.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+    if (hint) {
+      hint.hidden = !show;
+      hint.setAttribute("aria-hidden", show ? "false" : "true");
+    }
+  }
+
   function setStageOverlay(kind, title, detail) {
     var stage = SB.$("#stage");
     var overlay = SB.$("#stageOverlay");
@@ -254,6 +357,8 @@ SB.TranslateView = function () {
       if (overlay) overlay.hidden = true;
       return;
     }
+    /* Live overlay owns the stage copy — never stack Demo tip / empty state under it */
+    setDemoEmptyVisible(false);
     stage.classList.add(kind === "error" ? "is-error" : "is-starting");
     if (!overlay) return;
     overlay.hidden = false;
@@ -272,10 +377,9 @@ SB.TranslateView = function () {
     if (live().getState() !== "off") { live().stop(); SB.Engine._hands(0); }
     SB.Engine.setMode("demo");
     var stage = SB.$("#stage");
-    stage.classList.remove("is-cam", "is-mirror");
+    stage.classList.remove("is-cam", "is-mirror", "is-starting", "is-error");
     setStageOverlay(null);
-    SB.$("#stageDemo").style.display = "";
-    var _hint = SB.$("#demoHintBar"); if (_hint) _hint.hidden = false;
+    setDemoEmptyVisible(true);
     SB.$("#mirrorToggle").classList.remove("is-on");
     var st = SB.$("#stageStatus");
     if (st) {
@@ -285,26 +389,42 @@ SB.TranslateView = function () {
 
     setPill("demo");
     refreshCapturePanelVisibility();
+    if (transcript && transcript.setStatus) transcript.setStatus("Idle", false);
+    /* Restore page atmosphere when leaving live camera */
+    if (SB.resumeThreeFX) SB.resumeThreeFX();
   }
 
   function goLive() {
     var stage = SB.$("#stage");
-    SB.$("#stageDemo").style.display = "none";
-    var _hint = SB.$("#demoHintBar"); if (_hint) _hint.hidden = true;
+    setDemoEmptyVisible(false);
     setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
+    /* Live cam owns the stage plane — pause bg motion to save GPU while filming */
+    if (SB.pauseThreeFX) SB.pauseThreeFX();
 
+    /* Perf HUD never auto-on with Live — only Settings / ?perf=1 / ?debugTrack=1 */
+    var wantHud = !!(SB.settings && SB.settings.perfHud);
+    try {
+      wantHud = wantHud || /(?:^|[?&])(?:perf|debugTrack)=1(?:&|$)/.test(location.search || "");
+    } catch (e) {}
     SB.Engine.setMode("live", {
       videoEl: SB.$("#cam"),
       canvasEl: SB.$("#overlay"),
       mirror: SB.settings.mirror,
       drawLandmarks: SB.settings.landmarks !== false,
+      showHud: !!wantHud,
     }).then(function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
-      if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.start === "function") {
+      /* LSTM needs Holistic pose — only auto-start with ?holistic=1 */
+      var wantLstm = false;
+      try {
+        wantLstm = /(?:^|[?&])holistic=1(?:&|$)/.test(location.search || "");
+      } catch (e) {}
+      if (wantLstm && window.SignBridgeLiveTest &&
+          typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();
       }
 
@@ -316,6 +436,7 @@ SB.TranslateView = function () {
       setPill("live");
       refreshCapturePanelVisibility();
       if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
+      if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
 
       SB.toast(live().hasClassifier()
         ? "Live engine on â€” hand tracking + your classifier"
@@ -328,6 +449,7 @@ SB.TranslateView = function () {
         (err && err.message ? err.message : "Permission denied or no camera found.") + " You can stay in Demo mode.");
 
       setPill("demo", true);
+      if (SB.resumeThreeFX) SB.resumeThreeFX();
       SB.toast("Live mode needs a camera â€” " + (err && err.message ? err.message : "unavailable") + ". Staying in demo.", "error");
       SB.$$("#modeSeg button").forEach(function (b) { b.classList.toggle("is-on", b.dataset.mode === "demo"); });
       setTimeout(function () {
@@ -369,22 +491,31 @@ SB.TranslateView = function () {
     });
   }
 
-  /* ---------- quick phrases (chips + hotkeys 1â€“9) ---------- */
+  /* ---------- quick phrases (chips + hotkeys 1–9) ---------- */
   function bindQuickPhrases() {
     var wrap = SB.$("#quickChips");
-    SB.QUICK_PHRASES.forEach(function (p, i) {
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    var list = SB.QUICK_PHRASES || [];
+    list.forEach(function (p, i) {
+      var phrase = SB.PHRASE_MAP && SB.PHRASE_MAP[p.id];
+      if (!phrase) return;
       var btn = document.createElement("button");
+      btn.type = "button";
       btn.className = "chip";
-      btn.innerHTML = '<span>' + p.emoji + "</span> " + SB.PHRASE_MAP[p.id].name + '<span class="kbd-hint">' + (i + 1) + "</span>";
+      btn.innerHTML =
+        "<span aria-hidden=\"true\">" + (p.emoji || "") + "</span> " +
+        SB.escHtml(phrase.name) +
+        '<span class="kbd-hint">' + (i + 1) + "</span>";
       btn.addEventListener("click", function () { signPhrase(p.id); });
       wrap.appendChild(btn);
     });
 
     document.addEventListener("keydown", function (e) {
-      if (e.target.tagName === "INPUT") return;
+      if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
       var n = parseInt(e.key, 10);
-      if (n >= 1 && n <= SB.QUICK_PHRASES.length) {
-        signPhrase(SB.QUICK_PHRASES[n - 1].id);
+      if (n >= 1 && n <= list.length) {
+        signPhrase(list[n - 1].id);
       }
     });
   }
@@ -454,6 +585,16 @@ SB.TranslateView = function () {
       if (!text) { SB.toast("Nothing to copy yet", "info"); return; }
       SB.copyText(text);
     });
+    var dl = SB.$("#tDownload");
+    if (dl) {
+      dl.addEventListener("click", function () {
+        if (!transcript.downloadText()) {
+          SB.toast("Nothing to download yet", "info");
+          return;
+        }
+        SB.toast("Transcript downloaded", "ok");
+      });
+    }
     SB.$("#tSpeak").addEventListener("click", function () {
       var text = transcript.allText();
       if (!text) { SB.toast("Nothing to speak yet", "info"); return; }

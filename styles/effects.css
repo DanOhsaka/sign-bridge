@@ -218,10 +218,10 @@
   background: var(--grad);
   box-shadow: var(--shadow-1);
   transition:
-    left 280ms cubic-bezier(.34, 1.35, .64, 1),
-    top 280ms cubic-bezier(.34, 1.35, .64, 1),
-    width 280ms cubic-bezier(.34, 1.35, .64, 1),
-    height 280ms cubic-bezier(.34, 1.35, .64, 1),
+    left var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
+    top var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
+    width var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
+    height var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
     opacity 180ms var(--ease);
   pointer-events: none;
   opacity: 0;
@@ -234,10 +234,10 @@
 }
 .nav a.active {
   background: transparent !important;
-  color: #04121a !important;
+  color: #041018 !important;
   box-shadow: none !important;
 }
-[data-theme="light"] .nav a.active { color: #fff !important; }
+[data-theme="light"] .nav a.active { color: #041018 !important; }
 
 /* Segmented with native track: never show BeUI gradient pill */
 .segmented:has(.seg-track) > .be-pill,
@@ -465,7 +465,36 @@ html.sb-has-three body::before {
 #stage {
   isolation: isolate;
 }
-/* Dark: opaque panels kill mid-screen Three bleed */
+/* Theme-aware surfaces ease with polish --sb-theme-dur (avoid layout thrash) */
+.stage-card,
+.transcript-card,
+.arena,
+.etiquette,
+.auth-welcome,
+.auth-form-card,
+#stage {
+  transition:
+    background-color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    background var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    border-color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    box-shadow var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1));
+}
+
+/* Dark panels stay readable but leave edge bleed for Three atmosphere.
+   Translate used to force a full-viewport opaque transcript slab — avoid that. */
+html[data-theme="dark"] .view--translate {
+  background: transparent;
+}
+html[data-theme="dark"] .view--translate .transcript-card,
+html[data-theme="dark"].sb-has-three .view--translate .transcript-card {
+  background: color-mix(in srgb, #0d1425 92%, transparent) !important;
+}
+html[data-theme="dark"] .view--translate .stage-card,
+html[data-theme="dark"].sb-has-three .view--translate .stage-card {
+  background: color-mix(in srgb, #0d1425 94%, transparent) !important;
+}
+/* Dark: opaque panels kill mid-screen Three bleed on stage media */
 html[data-theme="dark"] #stage,
 html[data-theme="dark"].sb-has-three #stage {
   background: #0d1425 !important;
@@ -517,9 +546,15 @@ html[data-theme="dark"] .stage-card .stage-status,
 html[data-theme="dark"] .stage-card .demo-hint-bar,
 html[data-theme="dark"] .stage-card #stage,
 html[data-theme="dark"] .stage-card .stage,
-html[data-theme="dark"] .transcript-card > header {
+html[data-theme="dark"] .transcript-card > header,
+html[data-theme="dark"] .transcript-card .tx-head,
+html[data-theme="dark"] .transcript-card .tx-actions,
+html[data-theme="dark"] .transcript-card .tx-current {
   background-color: #0d1425 !important;
   background-image: none !important;
+}
+html[data-theme="dark"] .transcript-card .tx-current {
+  background: color-mix(in srgb, #0d1425 88%, #1a2438) !important;
 }
 /* Light: soft frosted glass — Three shows through; text stays dark/readable */
 html[data-theme="light"] .stage-card,
@@ -551,12 +586,33 @@ html[data-theme="light"] .stage-card .demo-hint-bar,
 html[data-theme="light"] .stage-card #stage,
 html[data-theme="light"] .stage-card .stage,
 html[data-theme="light"] .transcript-card > header,
+html[data-theme="light"] .transcript-card .tx-head,
+html[data-theme="light"] .transcript-card .tx-actions,
+html[data-theme="light"] .transcript-card .tx-current,
 html[data-theme="light"] #stage {
   background: rgba(255, 255, 255, 0.42) !important;
   background-image: none !important;
   backdrop-filter: blur(10px) !important;
   -webkit-backdrop-filter: blur(10px) !important;
 }
+html[data-theme="light"] .transcript-card .tx-action {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+}
+html[data-theme="light"] .transcript-card .tx-action-primary {
+  background: color-mix(in srgb, var(--teal) 16%, #fff);
+  color: color-mix(in srgb, var(--teal) 70%, #0a1a18);
+}
+html[data-theme="light"] .tx-current-word,
+html[data-theme="light"] .tx-current.has-sign .tx-current-word,
+html[data-theme="light"] .tx-title h2,
+html[data-theme="light"] .tx-status {
+  color: #0c1424 !important;
+}
+html[data-theme="light"] .tx-current-word.is-high { color: #0d9488 !important; }
+html[data-theme="light"] .tx-current-word.is-mid { color: #d97706 !important; }
+html[data-theme="light"] .tx-current-word.is-low { color: #dc2626 !important; }
+html[data-theme="light"] .stream-src.src-demo { color: #d97706 !important; }
 html[data-theme="light"] .topbar {
   background: color-mix(in srgb, #e8edf6 70%, transparent) !important;
   backdrop-filter: blur(16px) saturate(1.15) !important;

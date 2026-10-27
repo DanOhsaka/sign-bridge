@@ -24,6 +24,7 @@ SB.DEFAULTS = {
   speakLang: "en",        // BCP-47 primary tag for TTS output language
   rate: 1,
   reduceMotion: false,
+  perfHud: false,         // Opt-in FPS/latency HUD only (?perf=1 / Settings)
   mode: "demo",
 };
 
@@ -58,48 +59,76 @@ SB.settings = Object.assign({}, SB.DEFAULTS, SB.store.get("settings", {}));
 SB.saveSettings = function () { SB.store.set("settings", SB.settings); };
 
 /* ---------- Theme ---------- */
+SB.prefersReducedMotion = function () {
+  if (SB.settings && SB.settings.reduceMotion) return true;
+  try {
+    return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  } catch (e) { return false; }
+};
+
 SB.resolveTheme = function () {
   var pref = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   return SB.settings.theme === "auto" ? pref : SB.settings.theme;
 };
 
-SB.applyTheme = function () {
+SB._themeAnimTimer = 0;
+
+SB.applyTheme = function (opts) {
+  opts = opts || {};
   var theme = SB.resolveTheme();
-  document.documentElement.setAttribute("data-theme", theme);
-  document.documentElement.classList.toggle("reduce-motion", !!SB.settings.reduceMotion);
+  var root = document.documentElement;
+  var prev = root.getAttribute("data-theme");
+  var reduce = SB.prefersReducedMotion();
+
+  root.classList.toggle("reduce-motion", !!(SB.settings && SB.settings.reduceMotion));
+
+  /* Mark a short anim window so CSS can use longer token transitions.
+     Skip when reduced-motion or when theme did not change (resize / init). */
+  if (!reduce && opts.animate !== false && prev && prev !== theme) {
+    root.classList.add("sb-theme-changing");
+    if (SB._themeAnimTimer) clearTimeout(SB._themeAnimTimer);
+    SB._themeAnimTimer = setTimeout(function () {
+      root.classList.remove("sb-theme-changing");
+      SB._themeAnimTimer = 0;
+    }, 420);
+  }
+
+  if (prev !== theme) root.setAttribute("data-theme", theme);
+  else if (!prev) root.setAttribute("data-theme", theme);
+
   SB._positionThemePill(theme);
 };
 
-/* Move the sliding pill to the active side */
+/* CSS-driven pill — toggle classes only (no getBoundingClientRect thrash). */
 SB._positionThemePill = function (theme) {
-  var sw   = SB.$("#themeSwitch");
-  var pill = SB.$("#tsPill");
-  if (!sw || !pill) return;
+  var sw = SB.$("#themeSwitch");
+  if (!sw) return;
 
-  // resolve "auto" to the real theme for pill position
   var resolved = theme;
   if (resolved === "auto") {
     resolved = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   }
 
-  var target = sw.querySelector(".ts-" + resolved);
-  var track  = sw.querySelector(".ts-track");
-  if (!target || !track) return;
+  /* Clear any legacy inline geometry from older builds */
+  var pill = SB.$("#tsPill");
+  if (pill) {
+    pill.style.left = "";
+    pill.style.width = "";
+  }
 
-  var tr = track.getBoundingClientRect();
-  var mr = target.getBoundingClientRect();
-  pill.style.left  = (mr.left - tr.left) + "px";
-  pill.style.width = mr.width + "px";
-
-  sw.classList.toggle("is-dark",  resolved === "dark");
+  sw.classList.toggle("is-dark", resolved === "dark");
   sw.classList.toggle("is-light", resolved === "light");
+  sw.setAttribute("aria-checked", resolved === "light" ? "true" : "false");
+  sw.setAttribute("aria-label", resolved === "light" ? "Theme: Light" : "Theme: Dark");
 };
 
 SB.setTheme = function (theme) {
   if (theme !== "dark" && theme !== "light" && theme !== "auto") return;
+  var before = SB.resolveTheme();
   SB.settings.theme = theme;
   SB.saveSettings();
-  SB.applyTheme();
+  var after = SB.resolveTheme();
+  SB.applyTheme({ animate: before !== after });
 };
 
 SB.toggleTheme = function () {
@@ -304,7 +333,7 @@ SB.initCommon = function () {
   /* ensure settings starts closed (guards against stale classes) */
   SB.closeDrawer();
 
-  /* global topbar wiring — sliding theme switch */
+  /* global topbar wiring — sliding theme switch (CSS pill, no layout measure) */
   var themeSwitch = SB.$("#themeSwitch");
   if (themeSwitch) {
     /* One handler only — inline onclick on some pages caused double-toggle */
@@ -317,10 +346,17 @@ SB.initCommon = function () {
       }
       SB.toggleTheme();
     });
-    requestAnimationFrame(function () {
-      setTimeout(function () { SB._positionThemePill(SB.resolveTheme()); }, 80);
+    themeSwitch.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        if (e.key === "ArrowLeft") SB.setTheme("dark");
+        else if (e.key === "ArrowRight") SB.setTheme("light");
+        else SB.toggleTheme();
+      }
     });
-    window.addEventListener("resize", function () { SB.applyTheme(); });
+    if (!themeSwitch.hasAttribute("tabindex")) themeSwitch.setAttribute("tabindex", "0");
+    /* Initial class sync without animating */
+    SB.applyTheme({ animate: false });
   }
 
   /* Ensure every page has a sliding nav pill */
@@ -332,7 +368,14 @@ SB.initCommon = function () {
     navEl.insertBefore(pillEl, navEl.firstChild);
   }
 
-  /* nav sliding pill */
+  /* active nav state BEFORE first pill measure */
+  var view = document.body.getAttribute("data-view");
+  SB.$$(".nav a[data-nav]").forEach(function (a) {
+    a.classList.toggle("active", a.getAttribute("data-nav") === view);
+  });
+
+  /* nav sliding pill — same duration as theme via CSS --sb-nav-dur */
+  SB._navOrder = { translate: 0, practice: 1, learn: 2 };
   SB._movePill = function () {
     var active = SB.$(".nav a.active");
     var pill   = SB.$("#navPill");
@@ -349,17 +392,38 @@ SB.initCommon = function () {
   });
   window.addEventListener("resize", SB._movePill);
 
-  /* Soft MPA navigation via View Transitions when available */
-  SB.$$(".nav a[data-nav], .logo").forEach(function (a) {
+  /* MPA nav: stash direction for cross-doc View Transitions, then let
+     `@view-transition { navigation: auto }` run (do NOT preventDefault —
+     that broke Live/Three teardown and skipped the browser VT path). */
+  SB.$$(".nav a[data-nav]").forEach(function (a) {
     a.addEventListener("click", function (e) {
       if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || a.target === "_blank") return;
-      if (!document.startViewTransition) return;
+      if (SB.prefersReducedMotion && SB.prefersReducedMotion()) return;
       var href = a.getAttribute("href");
       if (!href || href.charAt(0) === "#") return;
-      e.preventDefault();
-      document.startViewTransition(function () {
-        window.location.href = a.href;
-      });
+      var to = a.getAttribute("data-nav");
+      var from = document.body.getAttribute("data-view") || "";
+      if (to === from) {
+        e.preventDefault();
+        return;
+      }
+      var fromI = SB._navOrder[from];
+      var toI = SB._navOrder[to];
+      var dir = "0";
+      if (typeof fromI === "number" && typeof toI === "number" && toI !== fromI) {
+        dir = toI > fromI ? "1" : "-1";
+      }
+      try {
+        sessionStorage.setItem("sb.navDir", dir);
+        sessionStorage.setItem("sb.navFrom", from);
+        sessionStorage.setItem("sb.navTo", to || "");
+      } catch (err) {}
+      document.documentElement.setAttribute("data-nav-dir", dir);
+      /* Soft-pause Three during nav so the VT snapshot stays cheap;
+         next page remounts atmosphere fresh. Live cam ends with unload. */
+      if (SB.pauseThreeFX) {
+        try { SB.pauseThreeFX(); } catch (err2) {}
+      }
     });
   });
 
@@ -393,13 +457,7 @@ SB.initCommon = function () {
     if (e.key === "Escape") SB.closeDrawer();
   });
 
-  SB.applyTheme();
-
-  /* active nav state */
-  var view = document.body.getAttribute("data-view");
-  SB.$$(".nav a[data-nav]").forEach(function (a) {
-    if (a.getAttribute("data-nav") === view) a.classList.add("active");
-  });
+  SB.applyTheme({ animate: false });
 
   if (SB.paintAuthSlot) SB.paintAuthSlot();
 
