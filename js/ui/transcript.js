@@ -18,8 +18,9 @@ window.SB = window.SB || {};
 SB._TX_EMPTY_HTML =
   '<div class="empty tx-empty">' +
   '<div class="empty-title">Waiting for signs</div>' +
-  '<div class="empty-hint">Words stream here as one growing sentence. Press ' +
-  '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live.</div>' +
+  '<div class="empty-hint" id="txEmptyHint">Words stream here as one growing sentence. Press ' +
+  '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live ' +
+  '(built-in letter handshapes fill CURRENT SIGN).</div>' +
   "</div>";
 
 function SB_formatClock(d) {
@@ -269,6 +270,18 @@ SB.Transcript = function (container, opts) {
 
   self.setCurrentSign = updateCurrentSign;
   self.setStatus = setWorkspaceStatus;
+
+  /** Update empty-state copy for Live vs Demo (no-op once tokens exist). */
+  self.setLiveHint = function (hint) {
+    var h = document.getElementById("txEmptyHint");
+    if (!h) {
+      var empty = el.querySelector(".empty-hint");
+      if (empty) h = empty;
+    }
+    if (h && hint) h.innerHTML = hint;
+    var title = el.querySelector(".empty-title");
+    if (title && hint) title.textContent = "Waiting for a clear handshape";
+  };
 
   self.speakAll = function () { SB.speak(self.allText()); };
 
