@@ -1146,21 +1146,29 @@ SB.LiveEngine = function () {
     heavyFrame++;
     var runHeavy = (heavyFrame & 1) === 0;
 
-    /* Never feed gated/held-only garbage to classifier — require accepted */
+    /* Classify on accepted OR brief hold — landmarks are already gated.
+       Mirror display: flip x so handshapes match what the signer sees. */
     if (runHeavy && classifier) {
       var classifierHand =
-        (leftUp.accepted && leftSlot.lastRaw) ||
-        (rightUp.accepted && rightSlot.lastRaw) ||
+        ((leftUp.accepted || leftUp.held) && leftSlot.lastRaw) ||
+        ((rightUp.accepted || rightUp.held) && rightSlot.lastRaw) ||
         null;
       if (classifierHand) {
-        var features = landmarkVector(classifierHand);
+        var handForCls = classifierHand;
+        if (mirror) handForCls = mirrorLandmarksX(classifierHand);
+        var features = landmarkVector(handForCls);
         var token = null;
         try { token = classifier(features); } catch (err) {
           console.error("Classifier error:", err);
         }
-        if (token) {
-          token.source = "live";
+        stats.classifyCalls = (stats.classifyCalls || 0) + 1;
+        if (token && token.text) {
+          token.source = token.source || "live";
+          stats.lastGloss = String(token.text);
+          stats.lastGlossConf = typeof token.conf === "number" ? token.conf : 0;
           if (SB.Engine && SB.Engine._result) SB.Engine._result(token);
+        } else {
+          stats.classifyNulls = (stats.classifyNulls || 0) + 1;
         }
       }
     }
@@ -1557,6 +1565,22 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
   // Features for classifier (unchanged contract)
   // ----------------------------------------------------------
+
+  /** Flip landmark x in image space (mirror UX ↔ camera coords). */
+  function mirrorLandmarksX(landmarks) {
+    var out = new Array(landmarks.length);
+    var i;
+    for (i = 0; i < landmarks.length; i++) {
+      var p = landmarks[i];
+      out[i] = {
+        x: 1 - p.x,
+        y: p.y,
+        z: p.z,
+        visibility: p.visibility,
+      };
+    }
+    return out;
+  }
 
   function landmarkVector(landmarks) {
     var wrist = landmarks[0];

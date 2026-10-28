@@ -22,18 +22,33 @@ SB.TranslateView = function () {
 
   function debounceMsFor(conf) {
     conf = typeof conf === "number" ? conf : 0;
-    if (conf >= 0.9) return 450;
-    if (conf >= 0.75) return 900;
-    return 1600;
+    /* Live glosses change often — keep debounce short so transcript fills. */
+    if (conf >= 0.85) return 380;
+    if (conf >= 0.6) return 650;
+    return 900;
   }
 
   function holdMsFor(conf) {
     conf = typeof conf === "number" ? conf : 0;
-    /* High-confidence static signs: short hold; lower conf needs longer stability. */
-    if (conf >= 0.9) return 120;
-    if (conf >= 0.8) return 220;
-    if (conf >= 0.7) return 350;
-    return 500;
+    /* Short holds so CURRENT SIGN → transcript keeps up with Live landmarks. */
+    if (conf >= 0.85) return 80;
+    if (conf >= 0.65) return 140;
+    if (conf >= 0.5) return 220;
+    return 320;
+  }
+
+  function ensureLiveRecognizer() {
+    var eng = live();
+    var gloss = SB.HandshapeClassifier || SB.LiveGlossRecognizer;
+    if (!gloss || typeof gloss.classify !== "function") return false;
+    /* Always (re)attach built-in gloss path unless a custom model was set. */
+    if (!eng.hasClassifier() || eng._classifierKind === "handshape") {
+      eng.setClassifier(gloss.classify);
+      eng._classifierKind = "handshape";
+      if (gloss.reset) gloss.reset();
+      return true;
+    }
+    return eng.hasClassifier();
   }
 
   function commitToken(tok, waitedMs) {
@@ -333,7 +348,7 @@ SB.TranslateView = function () {
   /* ---------- engine status pill (topbar) ---------- */
   function recognizerPillLabel() {
     if (!live().hasClassifier()) return "tracking";
-    if (live()._classifierKind === "handshape") return "handshapes";
+    if (live()._classifierKind === "handshape") return "glosses";
     return "model ready";
   }
 
@@ -414,6 +429,17 @@ SB.TranslateView = function () {
     setPill("demo");
     refreshCapturePanelVisibility();
     if (transcript && transcript.setStatus) transcript.setStatus("Idle", false);
+    if (transcript && transcript.setLiveHint) {
+      var hint = document.getElementById("txEmptyHint");
+      if (hint) {
+        hint.innerHTML =
+          "Words stream here as one growing sentence. Press " +
+          '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live ' +
+          "(built-in letter handshapes fill CURRENT SIGN).";
+      }
+      var title = document.querySelector("#transcript .empty-title");
+      if (title) title.textContent = "Waiting for signs";
+    }
     /* Restore page atmosphere when leaving live camera */
     if (SB.resumeThreeFX) SB.resumeThreeFX();
   }
@@ -426,6 +452,9 @@ SB.TranslateView = function () {
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
     /* Live cam owns the stage plane — pause bg motion to save GPU while filming */
     if (SB.pauseThreeFX) SB.pauseThreeFX();
+
+    /* Attach recognizer BEFORE camera start so first accepted frames classify. */
+    ensureLiveRecognizer();
 
     /* Perf HUD never auto-on with Live — only Settings / ?perf=1 / ?debugTrack=1 */
     var wantHud = !!(SB.settings && SB.settings.perfHud);
@@ -443,19 +472,9 @@ SB.TranslateView = function () {
       stage.classList.add("is-cam");
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
 
-      /* Recognition path:
-         1) Trained classifier via setClassifier (preferred)
-         2) Else built-in HandLandmarker handshape heuristic → transcript tokens
-         3) LSTM phrase model only with ?holistic=1 (needs pose + /api/predict) */
-      var recogLabel = "tracking";
-      if (!live().hasClassifier() && SB.HandshapeClassifier &&
-          typeof SB.HandshapeClassifier.classify === "function") {
-        live().setClassifier(SB.HandshapeClassifier.classify);
-        live()._classifierKind = "handshape";
-        recogLabel = "handshapes";
-      } else if (live().hasClassifier()) {
-        recogLabel = (live()._classifierKind === "handshape") ? "handshapes" : "model ready";
-      }
+      /* Re-assert recognizer after start (custom models win if already set). */
+      ensureLiveRecognizer();
+      var recogLabel = recognizerPillLabel();
 
       var wantLstm = false;
       try {
@@ -464,7 +483,7 @@ SB.TranslateView = function () {
       if (wantLstm && window.SignBridgeLiveTest &&
           typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();
-        recogLabel = recogLabel === "model ready" ? "model + LSTM" : "handshapes + LSTM";
+        recogLabel = recogLabel === "model ready" ? "model + LSTM" : "glosses + LSTM";
       }
 
       SB.$("#mirrorToggle").classList.toggle("is-on", !!SB.settings.mirror);
@@ -476,27 +495,24 @@ SB.TranslateView = function () {
       refreshCapturePanelVisibility();
       if (st) {
         st.innerHTML = live().hasClassifier()
-          ? '<span class="dot"></span>Live recognition on — hold a clear ASL letter handshape…'
+          ? '<span class="dot"></span>Live recognition on — sign Hello / Yes / Peace / You…'
           : '<span class="dot"></span>Camera ready — landmarks only (no classifier attached).';
       }
       if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
       if (transcript && transcript.setLiveHint) {
         transcript.setLiveHint(live().hasClassifier()
-          ? "Hold a steady ASL letter (A, B, V, L…). CURRENT SIGN updates when the handshape is stable."
-          : "Landmarks only — attach a classifier or enable built-in handshapes to fill the transcript.");
+          ? "Open hand → Hello, fist → Yes, V → Peace, point → You. CURRENT SIGN updates as you hold."
+          : "Landmarks only — attach a classifier to fill the transcript.");
       }
 
       SB.toast(live().hasClassifier()
         ? (live()._classifierKind === "handshape"
-          ? "Live on — tracking + built-in handshape letters → transcript"
+          ? "Live on — landmark glosses → CURRENT SIGN + transcript"
           : "Live engine on — hand tracking + your classifier")
         : "Live on — landmarks only (no recognizer). Demo keys still work.", "ok");
-      /* Keep engine pill honest about which recognizer is active */
       try {
         var pill = SB.$("#enginePill");
-        if (pill) {
-          SB.$(".pill-text", pill).textContent = "Live · " + recogLabel;
-        }
+        if (pill) SB.$(".pill-text", pill).textContent = "Live · " + recogLabel;
       } catch (e2) {}
     }).catch(function (err) {
       if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.stop === "function") {
