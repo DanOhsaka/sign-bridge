@@ -174,41 +174,185 @@ SB._speakLangMeta = function (code) {
 SB._pickVoiceForLang = function (bcp47) {
   var voices = SB.voices || [];
   if (!voices.length) return null;
+  var primary = (bcp47 || "en").toLowerCase();
+  var base = primary.split("-")[0];
+  function matchesLang(v) {
+    var lang = (v.lang || "").toLowerCase();
+    return lang === primary || lang.indexOf(base) === 0;
+  }
+  /* Named voice only if it actually speaks the target language —
+     never force an English voice onto translated text (sounds like an accent). */
   var want = SB.settings.voice;
   if (want) {
     var named = voices.find(function (v) { return v.name === want; });
-    if (named) return named;
+    if (named && matchesLang(named)) return named;
   }
-  var primary = (bcp47 || "en").toLowerCase();
-  var base = primary.split("-")[0];
   return (
     voices.find(function (v) { return (v.lang || "").toLowerCase() === primary; }) ||
-    voices.find(function (v) { return (v.lang || "").toLowerCase().indexOf(base) === 0; }) ||
+    voices.find(function (v) { return matchesLang(v); }) ||
     null
   );
 };
 
+/* ASL gloss → natural phrase per speak language (MyMemory fails on HELLO/ALL-CAPS). */
+SB.SPEAK_GLOSSARY = {
+  hello: {
+    es: "Hola", fr: "Bonjour", de: "Hallo", it: "Ciao", pt: "Olá",
+    zh: "你好", ja: "こんにちは", ko: "안녕하세요", hi: "नमस्ते", ar: "مرحبا"
+  },
+  hi: {
+    es: "Hola", fr: "Salut", de: "Hi", it: "Ciao", pt: "Oi",
+    zh: "嗨", ja: "こんにちは", ko: "안녕", hi: "नमस्ते", ar: "مرحبا"
+  },
+  my: {
+    es: "mi", fr: "mon", de: "mein", it: "mio", pt: "meu",
+    zh: "我的", ja: "私の", ko: "나의", hi: "मेरा", ar: "لي"
+  },
+  name: {
+    es: "nombre", fr: "nom", de: "Name", it: "nome", pt: "nome",
+    zh: "名字", ja: "名前", ko: "이름", hi: "नाम", ar: "اسم"
+  },
+  yes: {
+    es: "Sí", fr: "Oui", de: "Ja", it: "Sì", pt: "Sim",
+    zh: "是", ja: "はい", ko: "네", hi: "हाँ", ar: "نعم"
+  },
+  no: {
+    es: "No", fr: "Non", de: "Nein", it: "No", pt: "Não",
+    zh: "不", ja: "いいえ", ko: "아니요", hi: "नहीं", ar: "لا"
+  },
+  thanks: {
+    es: "Gracias", fr: "Merci", de: "Danke", it: "Grazie", pt: "Obrigado",
+    zh: "谢谢", ja: "ありがとう", ko: "감사합니다", hi: "धन्यवाद", ar: "شكرا"
+  },
+  thank: {
+    es: "Gracias", fr: "Merci", de: "Danke", it: "Grazie", pt: "Obrigado",
+    zh: "谢谢", ja: "ありがとう", ko: "감사합니다", hi: "धन्यवाद", ar: "شكرا"
+  },
+  please: {
+    es: "Por favor", fr: "S'il vous plaît", de: "Bitte", it: "Per favore", pt: "Por favor",
+    zh: "请", ja: "お願いします", ko: "부탁합니다", hi: "कृपया", ar: "من فضلك"
+  },
+  goodbye: {
+    es: "Adiós", fr: "Au revoir", de: "Tschüss", it: "Arrivederci", pt: "Adeus",
+    zh: "再见", ja: "さようなら", ko: "안녕히 가세요", hi: "अलविदा", ar: "مع السلامة"
+  },
+  help: {
+    es: "Ayuda", fr: "Aide", de: "Hilfe", it: "Aiuto", pt: "Ajuda",
+    zh: "帮助", ja: "助けて", ko: "도와주세요", hi: "मदद", ar: "مساعدة"
+  },
+  love: {
+    es: "Amor", fr: "Amour", de: "Liebe", it: "Amore", pt: "Amor",
+    zh: "爱", ja: "愛", ko: "사랑", hi: "प्यार", ar: "حب"
+  },
+  friend: {
+    es: "Amigo", fr: "Ami", de: "Freund", it: "Amico", pt: "Amigo",
+    zh: "朋友", ja: "友達", ko: "친구", hi: "दोस्त", ar: "صديق"
+  },
+  "thank you": {
+    es: "Gracias", fr: "Merci", de: "Danke", it: "Grazie", pt: "Obrigado",
+    zh: "谢谢", ja: "ありがとう", ko: "감사합니다", hi: "धन्यवाद", ar: "شكرا"
+  },
+  "my name": {
+    es: "Me llamo", fr: "Je m'appelle", de: "Ich heiße", it: "Mi chiamo", pt: "Meu nome é",
+    zh: "我叫", ja: "私の名前は", ko: "제 이름은", hi: "मेरा नाम", ar: "اسمي"
+  },
+  "hello my name": {
+    es: "Hola, me llamo", fr: "Bonjour, je m'appelle", de: "Hallo, ich heiße",
+    it: "Ciao, mi chiamo", pt: "Olá, meu nome é",
+    zh: "你好，我叫", ja: "こんにちは、私の名前は", ko: "안녕하세요, 제 이름은",
+    hi: "नमस्ते, मेरा नाम", ar: "مرحبا، اسمي"
+  }
+};
+
+/** ALL-CAPS ASL gloss → sentence case so MyMemory accepts it. */
+SB._normalizeForTranslate = function (text) {
+  var s = String(text || "").replace(/\s+/g, " ").trim();
+  if (!s) return "";
+  var letters = s.replace(/[^A-Za-z]/g, "");
+  if (letters.length >= 2 && letters === letters.toUpperCase()) {
+    return s.toLowerCase().replace(/(^|\s)([a-z])/g, function (_, a, b) {
+      return a + b.toUpperCase();
+    });
+  }
+  return s;
+};
+
+SB._glossaryLookup = function (text, lang) {
+  var key = String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!key) return null;
+  var dst = (lang || "").split("-")[0].toLowerCase();
+  var table = SB.SPEAK_GLOSSARY || {};
+  if (table[key] && table[key][dst]) return table[key][dst];
+  /* Word-by-word for multi-gloss phrases when every token is known */
+  var parts = key.split(" ");
+  if (parts.length < 2) return null;
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    var row = table[parts[i]];
+    if (!row || !row[dst]) return null;
+    out.push(row[dst]);
+  }
+  return out.join(" ");
+};
+
+SB._isSameLanguageText = function (a, b) {
+  return String(a || "").replace(/\s+/g, " ").trim().toLowerCase() ===
+    String(b || "").replace(/\s+/g, " ").trim().toLowerCase();
+};
+
+SB._looksUntranslated = function (source, translated, dst) {
+  var out = String(translated || "").trim();
+  if (!out) return true;
+  if (/MYMEMORY WARNING/i.test(out)) return true;
+  if (/^testvalue$/i.test(out)) return true;
+  if (SB._isSameLanguageText(source, out)) return true;
+  /* Latin script target got back pure ASCII matching English words only */
+  var srcLetters = String(source || "").replace(/[^A-Za-z]/g, "").toLowerCase();
+  var outLetters = out.replace(/[^A-Za-z\u00C0-\u024F]/g, "").toLowerCase();
+  if (dst === "ja" || dst === "zh" || dst === "ko" || dst === "ar" || dst === "hi") {
+    /* Must contain non-Latin for these scripts when source was English letters */
+    if (srcLetters && !/[^\u0000-\u007F]/.test(out)) return true;
+  }
+  return false;
+};
+
 /**
  * Translate English source text → target language.
- * Uses free MyMemory (no API key). Falls back to project /api/translate if present.
- * Limits: public MyMemory quotas (~daily byte cap); offline → rejects.
+ * Prefers same-origin /api/translate (MyMemory proxy), then direct MyMemory.
+ * Normalizes ALL-CAPS glosses and uses a local glossary so HELLO→Hola/こんにちは.
  */
 SB.translateText = function (text, fromLang, toLang) {
   var src = (fromLang || "en").split("-")[0].toLowerCase();
   var dst = (toLang || "en").split("-")[0].toLowerCase();
-  var trimmed = String(text || "").trim();
+  var trimmed = String(text || "").replace(/\s+/g, " ").trim();
   if (!trimmed) return Promise.resolve("");
   if (src === dst) return Promise.resolve(trimmed);
 
-  var cacheKey = src + "|" + dst + "|" + trimmed;
+  var cacheKey = src + "|" + dst + "|" + trimmed.toLowerCase();
   if (SB._translateCache[cacheKey]) {
     return Promise.resolve(SB._translateCache[cacheKey]);
   }
 
-  function viaMyMemory() {
+  var normalized = SB._normalizeForTranslate(trimmed);
+  var gloss = SB._glossaryLookup(normalized, dst) || SB._glossaryLookup(trimmed, dst);
+  if (gloss) {
+    SB._translateCache[cacheKey] = gloss;
+    return Promise.resolve(gloss);
+  }
+
+  function accept(out) {
+    var translated = String(out || "").trim();
+    if (SB._looksUntranslated(trimmed, translated, dst) &&
+        SB._looksUntranslated(normalized, translated, dst)) {
+      throw new Error("untranslated");
+    }
+    return translated;
+  }
+
+  function viaMyMemory(q) {
     var url =
       "https://api.mymemory.translated.net/get?q=" +
-      encodeURIComponent(trimmed.slice(0, 450)) +
+      encodeURIComponent(String(q).slice(0, 450)) +
       "&langpair=" + encodeURIComponent(src + "|" + dst);
     return fetch(url).then(function (res) {
       if (!res.ok) throw new Error("translate HTTP " + res.status);
@@ -218,27 +362,30 @@ SB.translateText = function (text, fromLang, toLang) {
       if (!out || /MYMEMORY WARNING/i.test(out)) {
         throw new Error((data && data.responseDetails) || "translate failed");
       }
-      return String(out);
+      return accept(out);
     });
   }
 
-  function viaProjectApi() {
+  function viaProjectApi(q) {
     var base = (typeof SB.API_BASE === "string" ? SB.API_BASE : "");
     return fetch(base + "/api/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: trimmed, source: src, target: dst }),
+      body: JSON.stringify({ q: q, source: src, target: dst }),
     }).then(function (res) {
       if (!res.ok) throw new Error("api translate " + res.status);
       return res.json();
     }).then(function (data) {
       if (!data || !data.translatedText) throw new Error("empty api translate");
-      return String(data.translatedText);
+      return accept(data.translatedText);
     });
   }
 
-  return viaMyMemory()
-    .catch(function () { return viaProjectApi(); })
+  /* Same-origin proxy first (CORS-safe), then browser → MyMemory.
+     Try sentence-case query; ALL-CAPS HELLO is rejected by MyMemory. */
+  var query = normalized || trimmed;
+  return viaProjectApi(query)
+    .catch(function () { return viaMyMemory(query); })
     .then(function (translated) {
       SB._translateCache[cacheKey] = translated;
       return translated;
@@ -247,7 +394,8 @@ SB.translateText = function (text, fromLang, toLang) {
 
 /**
  * Speak transcript text. English path is unchanged (no network).
- * Other speakLang values: translate EN → target, then Web Speech with matching voice/lang.
+ * Other speakLang values: translate EN → target, then speak ONLY the
+ * translated text with a matching-language voice — never English+accent.
  */
 SB.speak = function (text) {
   if (!window.speechSynthesis) {
@@ -261,8 +409,10 @@ SB.speak = function (text) {
   var bcp47 = meta.bcp47 || meta.code || "en-US";
 
   function utter(spoken) {
+    var say = String(spoken || "").trim();
+    if (!say) return;
     speechSynthesis.cancel();
-    var u = new SpeechSynthesisUtterance(spoken);
+    var u = new SpeechSynthesisUtterance(say);
     u.lang = bcp47;
     u.rate = SB.settings.rate || 1;
     var voice = SB._pickVoiceForLang(bcp47);
@@ -280,11 +430,18 @@ SB.speak = function (text) {
 
   SB.toast("Translating to " + (meta.label || meta.code) + "…", "info");
   SB.translateText(raw, "en", meta.code).then(function (translated) {
-    utter(translated || raw);
+    var out = String(translated || "").trim();
+    if (!out) throw new Error("empty translation");
+    if (SB._looksUntranslated(raw, out, meta.code)) {
+      throw new Error("still english");
+    }
+    utter(out);
   }).catch(function () {
-    SB.toast("Translation unavailable — speaking English with selected voice", "info");
-    /* Still set lang so the engine uses a target-language voice if possible */
-    utter(raw);
+    SB.toast(
+      "Translation unavailable — won't speak English with a " +
+        (meta.label || meta.code) + " accent. Try again or pick English.",
+      "error"
+    );
   });
 };
 

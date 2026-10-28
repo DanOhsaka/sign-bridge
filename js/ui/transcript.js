@@ -18,8 +18,8 @@ window.SB = window.SB || {};
 SB._TX_EMPTY_HTML =
   '<div class="empty tx-empty">' +
   '<div class="empty-title">Waiting for signs</div>' +
-  '<div class="empty-hint">Words stream here as one growing sentence. Press ' +
-  '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live.</div>' +
+  '<div class="empty-hint" id="txEmptyHint">Words stream here as one growing sentence. Press ' +
+  '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live for hand tracking.</div>' +
   "</div>";
 
 function SB_formatClock(d) {
@@ -174,8 +174,10 @@ SB.Transcript = function (container, opts) {
     if (lastWordEl) lastWordEl.classList.remove("is-live-word");
     lastWordEl = span;
 
-    /* low confidence → unfold alternates under the word (inline) */
-    if (tok.alt && tok.alt.length && tok.conf < 0.8) {
+    /* Live: sentence stream only — never unfold "Did you mean?".
+       Demo may still show alternates for teaching near-misses. */
+    var isLiveTok = tok && String(tok.source || "").indexOf("live") === 0;
+    if (!isLiveTok && tok.alt && tok.alt.length && tok.conf < 0.8) {
       var wrap = document.createElement("span");
       wrap.className = "word-wrap";
       wrap.appendChild(span);
@@ -270,6 +272,18 @@ SB.Transcript = function (container, opts) {
   self.setCurrentSign = updateCurrentSign;
   self.setStatus = setWorkspaceStatus;
 
+  /** Update empty-state copy for Live vs Demo (no-op once tokens exist). */
+  self.setLiveHint = function (hint) {
+    var h = document.getElementById("txEmptyHint");
+    if (!h) {
+      var empty = el.querySelector(".empty-hint");
+      if (empty) h = empty;
+    }
+    if (h && hint) h.innerHTML = hint;
+    var title = el.querySelector(".empty-title");
+    if (title && hint) title.textContent = "Waiting for signs";
+  };
+
   self.speakAll = function () { SB.speak(self.allText()); };
 
   /* initial workspace chrome */
@@ -294,7 +308,9 @@ SB.Spotlight = function (el) {
       confEl.classList.toggle("is-low", tok.conf < 0.7);
 
       altsEl.innerHTML = "";
-      if (tok.alt && tok.alt.length && tok.conf < 0.8) {
+      /* Live: no "Did you mean?" — Demo teaching near-misses only */
+      var liveSrc = tok && String(tok.source || "").indexOf("live") === 0;
+      if (!liveSrc && tok.alt && tok.alt.length && tok.conf < 0.8) {
         var lbl = document.createElement("span");
         lbl.className = "alt-lbl";
         lbl.textContent = "Did you mean?";

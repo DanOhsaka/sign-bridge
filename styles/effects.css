@@ -481,23 +481,17 @@ html.sb-has-three body::before {
     color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1));
 }
 
-/* Dark panels stay readable but leave edge bleed for Three atmosphere.
-   Translate used to force a full-viewport opaque transcript slab — avoid that. */
+/* Dark panels: soft frosted glass so Demo/Live share the same Three atmosphere.
+   Translate used to force opaque slabs that buried the particle field. */
 html[data-theme="dark"] .view--translate {
   background: transparent;
 }
-html[data-theme="dark"] .view--translate .transcript-card,
-html[data-theme="dark"].sb-has-three .view--translate .transcript-card {
-  background: color-mix(in srgb, #0d1425 92%, transparent) !important;
-}
-html[data-theme="dark"] .view--translate .stage-card,
-html[data-theme="dark"].sb-has-three .view--translate .stage-card {
-  background: color-mix(in srgb, #0d1425 94%, transparent) !important;
-}
-/* Dark: opaque panels kill mid-screen Three bleed on stage media */
-html[data-theme="dark"] #stage,
-html[data-theme="dark"].sb-has-three #stage {
-  background: #0d1425 !important;
+/* Kill the opaque view underlay when Three owns the page bg */
+html[data-theme="dark"].sb-has-three .view--translate::before,
+html[data-theme="dark"].sb-has-three .view--practice::before,
+html[data-theme="dark"].sb-has-three .view--learn::before,
+html[data-theme="dark"].sb-has-three .view--auth::before {
+  background: transparent !important;
 }
 html[data-theme="dark"] .stage-card,
 html[data-theme="dark"] .stage-card.ac-glass,
@@ -523,9 +517,9 @@ html[data-theme="dark"].sb-has-three .stats-card > .card,
 html[data-theme="dark"].sb-has-three .etiquette,
 html[data-theme="dark"].sb-has-three .auth-welcome,
 html[data-theme="dark"].sb-has-three .auth-form-card {
-  background: #0d1425 !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
+  background: color-mix(in srgb, #0d1425 72%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.15) !important;
   --gx: 50%;
   --gy: 50%;
 }
@@ -540,21 +534,31 @@ html[data-theme="dark"].sb-has-three .auth-form-card {
   content: none !important;
   opacity: 0 !important;
 }
+/* Soft inner chrome — keep readable, let edges breathe */
 html[data-theme="dark"] .stage-card .stage-head,
 html[data-theme="dark"] .stage-card .spell-strip,
 html[data-theme="dark"] .stage-card .stage-status,
 html[data-theme="dark"] .stage-card .demo-hint-bar,
-html[data-theme="dark"] .stage-card #stage,
-html[data-theme="dark"] .stage-card .stage,
 html[data-theme="dark"] .transcript-card > header,
 html[data-theme="dark"] .transcript-card .tx-head,
 html[data-theme="dark"] .transcript-card .tx-actions,
 html[data-theme="dark"] .transcript-card .tx-current {
-  background-color: #0d1425 !important;
+  background-color: color-mix(in srgb, #0d1425 55%, transparent) !important;
   background-image: none !important;
 }
+/* Camera well: solid enough for the video plane; Live keeps page Three around it */
+html[data-theme="dark"] #stage,
+html[data-theme="dark"].sb-has-three #stage,
+html[data-theme="dark"] .stage-card #stage,
+html[data-theme="dark"] .stage-card .stage {
+  background: color-mix(in srgb, #0d1425 88%, transparent) !important;
+}
+html[data-theme="dark"] .stage.is-cam,
+html[data-theme="dark"].sb-has-three .stage.is-cam {
+  background: #0a1220 !important;
+}
 html[data-theme="dark"] .transcript-card .tx-current {
-  background: color-mix(in srgb, #0d1425 88%, #1a2438) !important;
+  background: color-mix(in srgb, #0d1425 70%, #1a2438) !important;
 }
 /* Light: soft frosted glass — Three shows through; text stays dark/readable */
 html[data-theme="light"] .stage-card,

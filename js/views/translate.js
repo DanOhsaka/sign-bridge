@@ -12,45 +12,67 @@ window.SB = window.SB || {};
 SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
-  var lastPrediction = null;
-  var lastPredictionTime = 0;
   /* Adaptive confirm: high-confidence static glosses commit faster. */
-  var pending = null; /* { text, conf, source, firstMs, lastMs } */
+  var pending = null; /* { text, conf, source, firstMs, lastMs, glyph, alt } */
   var confirmTimer = null;
+  /* Same gloss appends once until pose changes or hand leaves the frame. */
+  var lockedGloss = null; /* lowercase text last committed while hand stayed up */
+  var poseChangeNeeded = false; /* after commit, require a different held gloss */
 
   function live() { return SB.Engine.getLiveEngine(); }
 
-  function debounceMsFor(conf) {
-    conf = typeof conf === "number" ? conf : 0;
-    if (conf >= 0.9) return 450;
-    if (conf >= 0.75) return 900;
-    return 1600;
-  }
-
   function holdMsFor(conf) {
     conf = typeof conf === "number" ? conf : 0;
-    /* High-confidence static signs: short hold; lower conf needs longer stability. */
-    if (conf >= 0.9) return 120;
-    if (conf >= 0.8) return 220;
-    if (conf >= 0.7) return 350;
-    return 500;
+    if (conf >= 0.85) return 100;
+    if (conf >= 0.65) return 160;
+    if (conf >= 0.5) return 240;
+    return 320;
+  }
+
+  function glossKey(text) {
+    return String(text || "").trim().toLowerCase();
+  }
+
+  function clearGlossLock() {
+    lockedGloss = null;
+    poseChangeNeeded = false;
+  }
+
+  /**
+   * Live recognition: Holistic + Python LSTM (/api/predict → :9001).
+   * Detach the experimental landmark→Hello/Yes gloss heuristic (wrong signs).
+   * No-spam lock below still applies when LSTM tokens arrive.
+   */
+  function ensureLiveRecognizer() {
+    var eng = live();
+    if (eng._classifierKind === "handshape") {
+      eng.setClassifier(null);
+      eng._classifierKind = null;
+      if (SB.HandshapeClassifier && SB.HandshapeClassifier.reset) {
+        try { SB.HandshapeClassifier.reset(); } catch (e) {}
+      }
+    }
+    return eng.hasClassifier();
   }
 
   function commitToken(tok, waitedMs) {
     if (!tok || !tok.text) return;
-    var now = Date.now();
-    var textKey = String(tok.text).trim().toLowerCase();
-    if (
-      textKey &&
-      textKey === lastPrediction &&
-      now - lastPredictionTime < debounceMsFor(tok.conf)
-    ) {
-      return;
-    }
-    lastPrediction = textKey;
-    lastPredictionTime = now;
-    transcript.addToken(tok);
-    spotlight.show(tok);
+    var textKey = glossKey(tok.text);
+    /* Hard lock: never re-append the same gloss until pose change / hand leave */
+    if (textKey && textKey === lockedGloss) return;
+
+    lockedGloss = textKey;
+    poseChangeNeeded = true;
+    /* Live sentence stream — strip alternates so UI never shows "Did you mean?" */
+    var out = {
+      text: tok.text,
+      conf: tok.conf,
+      glyph: tok.glyph,
+      source: tok.source || "live",
+    };
+    if (String(out.source).indexOf("live") !== 0 && tok.alt) out.alt = tok.alt;
+    transcript.addToken(out);
+    spotlight.show(out);
     try {
       var eng = live();
       if (eng && eng.noteConfirmMs) eng.noteConfirmMs(waitedMs || 0);
@@ -65,29 +87,62 @@ SB.TranslateView = function () {
     }
   }
 
+  function previewCurrent(tok) {
+    /* Show CURRENT SIGN immediately while confirm hold runs */
+    if (transcript && transcript.setCurrentSign) transcript.setCurrentSign(tok);
+  }
+
   function considerLiveToken(tok) {
     if (!tok || !tok.text) return;
     var now = performance.now();
     var text = String(tok.text).trim();
+    var textKey = glossKey(text);
     var conf = typeof tok.conf === "number" ? tok.conf : 0;
     var hold = holdMsFor(conf);
 
-    if (pending && pending.text === text) {
+    /* Still preview the active reading, but do not re-queue a locked gloss */
+    if (textKey && textKey === lockedGloss) {
+      previewCurrent(tok);
+      clearPending();
+      return;
+    }
+
+    /* After a commit, ignore the same family until a *different* gloss is held */
+    if (poseChangeNeeded && textKey === lockedGloss) {
+      previewCurrent(tok);
+      return;
+    }
+
+    if (pending && glossKey(pending.text) === textKey) {
       pending.lastMs = now;
       pending.conf = Math.max(pending.conf, conf);
+      if (tok.glyph) pending.glyph = tok.glyph;
+      if (tok.alt) pending.alt = tok.alt;
+      previewCurrent({
+        text: pending.text,
+        conf: pending.conf,
+        glyph: pending.glyph,
+        alt: pending.alt,
+      });
       if (now - pending.firstMs >= holdMsFor(pending.conf)) {
         var waited = now - pending.firstMs;
         var out = {
           text: pending.text,
           conf: pending.conf,
-          alt: tok.alt,
-          glyph: tok.glyph,
+          alt: pending.alt,
+          glyph: pending.glyph,
           source: tok.source || pending.source || "live",
         };
         clearPending();
         commitToken(out, waited);
       }
       return;
+    }
+
+    /* New distinct gloss → unlock prior lock and start a fresh hold */
+    if (lockedGloss && textKey && textKey !== lockedGloss) {
+      lockedGloss = null;
+      poseChangeNeeded = false;
     }
 
     clearPending();
@@ -97,14 +152,24 @@ SB.TranslateView = function () {
       source: tok.source || "live",
       firstMs: now,
       lastMs: now,
+      glyph: tok.glyph,
+      /* Live never carries alts into the sentence stream */
+      alt: null,
     };
+    previewCurrent(tok);
     confirmTimer = setTimeout(function () {
-      if (!pending || pending.text !== text) return;
+      if (!pending || glossKey(pending.text) !== textKey) return;
+      if (textKey === lockedGloss) {
+        clearPending();
+        return;
+      }
       var waited = performance.now() - pending.firstMs;
       var out = {
         text: pending.text,
         conf: pending.conf,
         source: pending.source,
+        glyph: pending.glyph,
+        alt: pending.alt,
       };
       clearPending();
       commitToken(out, waited);
@@ -153,7 +218,7 @@ SB.TranslateView = function () {
     );
 
 
-    /* hand-presence â†’ status line pulse */
+    /* hand-presence → status line pulse; leaving frame unlocks gloss re-fire */
     SB.Engine.on("hands", function (count) {
       var st = SB.$("#stageStatus");
       if (!st) return;
@@ -172,12 +237,18 @@ SB.TranslateView = function () {
           (live().hasClassifier()
             ? "recognizing…"
             : (overlayOn
-              ? "landmark overlay on. Attach your classifier to start recognizing (see docs/MODELS.md)."
+              ? "landmark overlay on — use Demo phrases (1–9) for transcript words, or attach a trained classifier."
               : "tracking, but overlay is off — turn on Landmarks to see the skeleton."));
 
       } else {
         st.classList.remove("is-hands");
-        st.innerHTML = '<span class="dot"></span>Move a hand into viewâ€¦';
+        st.innerHTML = '<span class="dot"></span>Move a hand into view…';
+        /* Hand left → allow the same gloss again on next raise */
+        clearGlossLock();
+        clearPending();
+        if (SB.HandshapeClassifier && SB.HandshapeClassifier.reset) {
+          try { SB.HandshapeClassifier.reset(); } catch (e) {}
+        }
       }
     });
 
@@ -315,11 +386,18 @@ SB.TranslateView = function () {
   }
 
   /* ---------- engine status pill (topbar) ---------- */
+  function recognizerPillLabel() {
+    if (!live().hasClassifier()) return "tracking";
+    return "model ready";
+  }
+
   function setPill(mode, err) {
     var pill = SB.$("#enginePill");
     if (!pill) return;
     pill.className = "engine-pill is-" + (err ? "error" : mode);
-    SB.$(".pill-text", pill).textContent = err ? "Camera unavailable" : (mode === "live" ? "Live · " + (live().hasClassifier() ? "model ready" : "tracking") : "Demo Â· simulated");
+    SB.$(".pill-text", pill).textContent = err
+      ? "Camera unavailable"
+      : (mode === "live" ? "Live · " + recognizerPillLabel() : "Demo · simulated");
   }
 
   /* ---------- Demo / Live mode switch ---------- */
@@ -389,7 +467,19 @@ SB.TranslateView = function () {
 
     setPill("demo");
     refreshCapturePanelVisibility();
+    clearGlossLock();
+    clearPending();
     if (transcript && transcript.setStatus) transcript.setStatus("Idle", false);
+    if (transcript && transcript.setLiveHint) {
+      var hint = document.getElementById("txEmptyHint");
+      if (hint) {
+        hint.innerHTML =
+          "Words stream here as one growing sentence. Press " +
+          '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live for hand tracking.';
+      }
+      var title = document.querySelector("#transcript .empty-title");
+      if (title) title.textContent = "Waiting for signs";
+    }
     /* Restore page atmosphere when leaving live camera */
     if (SB.resumeThreeFX) SB.resumeThreeFX();
   }
@@ -400,8 +490,12 @@ SB.TranslateView = function () {
     setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
-    /* Live cam owns the stage plane — pause bg motion to save GPU while filming */
-    if (SB.pauseThreeFX) SB.pauseThreeFX();
+    /* Keep Demo Three atmosphere under Live — only soft-pause for reduced motion /
+       page nav. Camera sits in the stage; page bg should still match Demo. */
+    if (SB.resumeThreeFX) SB.resumeThreeFX();
+
+    /* Attach recognizer BEFORE camera start so first accepted frames classify. */
+    ensureLiveRecognizer();
 
     /* Perf HUD never auto-on with Live — only Settings / ?perf=1 / ?debugTrack=1 */
     var wantHud = !!(SB.settings && SB.settings.perfHud);
@@ -418,14 +512,18 @@ SB.TranslateView = function () {
       setStageOverlay(null);
       stage.classList.add("is-cam");
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
-      /* LSTM needs Holistic pose — only auto-start with ?holistic=1 */
-      var wantLstm = false;
-      try {
-        wantLstm = /(?:^|[?&])holistic=1(?:&|$)/.test(location.search || "");
-      } catch (e) {}
-      if (wantLstm && window.SignBridgeLiveTest &&
+
+      /* Detach bad gloss heuristic; keep any real setClassifier model. */
+      ensureLiveRecognizer();
+      var recogLabel = recognizerPillLabel();
+
+      /* Always wire Live → Holistic landmarks → SignBridgeLiveTest → /api/predict */
+      var lstmOn = false;
+      if (window.SignBridgeLiveTest &&
           typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();
+        lstmOn = true;
+        recogLabel = recogLabel === "model ready" ? "model + LSTM" : "Holistic · LSTM";
       }
 
       SB.$("#mirrorToggle").classList.toggle("is-on", !!SB.settings.mirror);
@@ -435,12 +533,31 @@ SB.TranslateView = function () {
       if (live().setMirror) live().setMirror(!!SB.settings.mirror);
       setPill("live");
       refreshCapturePanelVisibility();
-      if (st) st.innerHTML = '<span class="dot"></span>Camera ready — move a hand into view…';
+      if (st) {
+        st.innerHTML = lstmOn
+          ? '<span class="dot"></span>Live recognition on — Holistic + LSTM (<code>signbridge_lstm.keras</code>).'
+          : live().hasClassifier()
+            ? '<span class="dot"></span>Live recognition on — trained classifier attached.'
+            : '<span class="dot"></span>Camera ready — landmarks only. Press 1–9 or Watch demo for sentence words.';
+      }
       if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
+      if (transcript && transcript.setLiveHint) {
+        transcript.setLiveHint(lstmOn
+          ? "Words stream here from the Keras LSTM when a 30-frame Holistic window is confident."
+          : live().hasClassifier()
+            ? "Words stream here as one sentence when the model is confident."
+            : "Live tracks hands. For transcript words: Demo keys <span class=\"kbd\">1</span>–<span class=\"kbd\">9</span>, Watch demo, or attach a trained classifier.");
+      }
 
-      SB.toast(live().hasClassifier()
-        ? "Live engine on â€” hand tracking + your classifier"
-        : "Live engine on â€” hand landmarks tracking (attach a classifier to recognize)", "ok");
+      SB.toast(lstmOn
+        ? "Live on — Holistic tracking + Keras LSTM"
+        : live().hasClassifier()
+          ? "Live engine on — hand tracking + your classifier"
+          : "Live on — landmarks only. Use Demo phrases for accurate transcript words.", "ok");
+      try {
+        var pill = SB.$("#enginePill");
+        if (pill) SB.$(".pill-text", pill).textContent = "Live · " + recogLabel;
+      } catch (e2) {}
     }).catch(function (err) {
       if (window.SignBridgeLiveTest && typeof window.SignBridgeLiveTest.stop === "function") {
         window.SignBridgeLiveTest.stop();
