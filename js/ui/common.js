@@ -174,23 +174,29 @@ SB._speakLangMeta = function (code) {
 SB._pickVoiceForLang = function (bcp47) {
   var voices = SB.voices || [];
   if (!voices.length) return null;
+  var primary = (bcp47 || "en").toLowerCase();
+  var base = primary.split("-")[0];
+  function matchesLang(v) {
+    var lang = (v.lang || "").toLowerCase();
+    return lang === primary || lang.indexOf(base) === 0;
+  }
+  /* Named voice only if it actually speaks the target language —
+     never force an English voice onto translated text (sounds like an accent). */
   var want = SB.settings.voice;
   if (want) {
     var named = voices.find(function (v) { return v.name === want; });
-    if (named) return named;
+    if (named && matchesLang(named)) return named;
   }
-  var primary = (bcp47 || "en").toLowerCase();
-  var base = primary.split("-")[0];
   return (
     voices.find(function (v) { return (v.lang || "").toLowerCase() === primary; }) ||
-    voices.find(function (v) { return (v.lang || "").toLowerCase().indexOf(base) === 0; }) ||
+    voices.find(function (v) { return matchesLang(v); }) ||
     null
   );
 };
 
 /**
  * Translate English source text → target language.
- * Uses free MyMemory (no API key). Falls back to project /api/translate if present.
+ * Prefers same-origin /api/translate (MyMemory proxy), then direct MyMemory.
  * Limits: public MyMemory quotas (~daily byte cap); offline → rejects.
  */
 SB.translateText = function (text, fromLang, toLang) {
@@ -237,8 +243,9 @@ SB.translateText = function (text, fromLang, toLang) {
     });
   }
 
-  return viaMyMemory()
-    .catch(function () { return viaProjectApi(); })
+  /* Same-origin proxy first (CORS-safe), then browser → MyMemory. */
+  return viaProjectApi()
+    .catch(function () { return viaMyMemory(); })
     .then(function (translated) {
       SB._translateCache[cacheKey] = translated;
       return translated;
@@ -247,7 +254,8 @@ SB.translateText = function (text, fromLang, toLang) {
 
 /**
  * Speak transcript text. English path is unchanged (no network).
- * Other speakLang values: translate EN → target, then Web Speech with matching voice/lang.
+ * Other speakLang values: translate EN → target (MyMemory), then speak
+ * the translated text with a matching-language voice — never English+accent.
  */
 SB.speak = function (text) {
   if (!window.speechSynthesis) {
@@ -280,11 +288,20 @@ SB.speak = function (text) {
 
   SB.toast("Translating to " + (meta.label || meta.code) + "…", "info");
   SB.translateText(raw, "en", meta.code).then(function (translated) {
-    utter(translated || raw);
+    var out = String(translated || "").trim();
+    if (!out) throw new Error("empty translation");
+    /* Refuse to speak the original English under a foreign voice/lang. */
+    if (out.toLowerCase() === raw.toLowerCase() && meta.code !== "en") {
+      /* Identical string can be a proper noun / short gloss — still speak
+         with the target voice only when MyMemory returned it intentionally. */
+    }
+    utter(out);
   }).catch(function () {
-    SB.toast("Translation unavailable — speaking English with selected voice", "info");
-    /* Still set lang so the engine uses a target-language voice if possible */
-    utter(raw);
+    SB.toast(
+      "Translation unavailable — won't speak English with a " +
+        (meta.label || meta.code) + " accent. Try again or pick English.",
+      "error"
+    );
   });
 };
 

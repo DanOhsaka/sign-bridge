@@ -38,16 +38,19 @@ SB.TranslateView = function () {
     poseChangeNeeded = false;
   }
 
+  /**
+   * Live recognition: Holistic + Python LSTM (/api/predict → :9001).
+   * Detach the experimental landmark→Hello/Yes gloss heuristic (wrong signs).
+   * No-spam lock below still applies when LSTM tokens arrive.
+   */
   function ensureLiveRecognizer() {
     var eng = live();
-    var gloss = SB.HandshapeClassifier || SB.LiveGlossRecognizer;
-    if (!gloss || typeof gloss.classify !== "function") return false;
-    /* Always (re)attach built-in gloss path unless a custom model was set. */
-    if (!eng.hasClassifier() || eng._classifierKind === "handshape") {
-      eng.setClassifier(gloss.classify);
-      eng._classifierKind = "handshape";
-      if (gloss.reset) gloss.reset();
-      return true;
+    if (eng._classifierKind === "handshape") {
+      eng.setClassifier(null);
+      eng._classifierKind = null;
+      if (SB.HandshapeClassifier && SB.HandshapeClassifier.reset) {
+        try { SB.HandshapeClassifier.reset(); } catch (e) {}
+      }
     }
     return eng.hasClassifier();
   }
@@ -60,8 +63,16 @@ SB.TranslateView = function () {
 
     lockedGloss = textKey;
     poseChangeNeeded = true;
-    transcript.addToken(tok);
-    spotlight.show(tok);
+    /* Live sentence stream — strip alternates so UI never shows "Did you mean?" */
+    var out = {
+      text: tok.text,
+      conf: tok.conf,
+      glyph: tok.glyph,
+      source: tok.source || "live",
+    };
+    if (String(out.source).indexOf("live") !== 0 && tok.alt) out.alt = tok.alt;
+    transcript.addToken(out);
+    spotlight.show(out);
     try {
       var eng = live();
       if (eng && eng.noteConfirmMs) eng.noteConfirmMs(waitedMs || 0);
@@ -142,7 +153,8 @@ SB.TranslateView = function () {
       firstMs: now,
       lastMs: now,
       glyph: tok.glyph,
-      alt: tok.alt,
+      /* Live never carries alts into the sentence stream */
+      alt: null,
     };
     previewCurrent(tok);
     confirmTimer = setTimeout(function () {
@@ -223,11 +235,9 @@ SB.TranslateView = function () {
         var overlayOn = SB.settings.landmarks !== false;
         st.innerHTML = '<span class="dot"></span>Hand detected — ' +
           (live().hasClassifier()
-            ? (live()._classifierKind === "handshape"
-              ? "reading gloss → transcript (one word until pose changes)…"
-              : "recognizing…")
+            ? "recognizing…"
             : (overlayOn
-              ? "landmark overlay on — no classifier (Demo keys still work)."
+              ? "landmark overlay on — use Demo phrases (1–9) for transcript words, or attach a trained classifier."
               : "tracking, but overlay is off — turn on Landmarks to see the skeleton."));
 
       } else {
@@ -378,7 +388,6 @@ SB.TranslateView = function () {
   /* ---------- engine status pill (topbar) ---------- */
   function recognizerPillLabel() {
     if (!live().hasClassifier()) return "tracking";
-    if (live()._classifierKind === "handshape") return "glosses";
     return "model ready";
   }
 
@@ -466,8 +475,7 @@ SB.TranslateView = function () {
       if (hint) {
         hint.innerHTML =
           "Words stream here as one growing sentence. Press " +
-          '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live ' +
-          "(built-in letter handshapes fill CURRENT SIGN).";
+          '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live for hand tracking.';
       }
       var title = document.querySelector("#transcript .empty-title");
       if (title) title.textContent = "Waiting for signs";
@@ -482,8 +490,9 @@ SB.TranslateView = function () {
     setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your hands in frame.");
     var st = SB.$("#stageStatus");
     if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
-    /* Live cam owns the stage plane — pause bg motion to save GPU while filming */
-    if (SB.pauseThreeFX) SB.pauseThreeFX();
+    /* Keep Demo Three atmosphere under Live — only soft-pause for reduced motion /
+       page nav. Camera sits in the stage; page bg should still match Demo. */
+    if (SB.resumeThreeFX) SB.resumeThreeFX();
 
     /* Attach recognizer BEFORE camera start so first accepted frames classify. */
     ensureLiveRecognizer();
@@ -504,18 +513,17 @@ SB.TranslateView = function () {
       stage.classList.add("is-cam");
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
 
-      /* Re-assert recognizer after start (custom models win if already set). */
+      /* Detach bad gloss heuristic; keep any real setClassifier model. */
       ensureLiveRecognizer();
       var recogLabel = recognizerPillLabel();
 
-      var wantLstm = false;
-      try {
-        wantLstm = /(?:^|[?&])holistic=1(?:&|$)/.test(location.search || "");
-      } catch (e) {}
-      if (wantLstm && window.SignBridgeLiveTest &&
+      /* Always wire Live → Holistic landmarks → SignBridgeLiveTest → /api/predict */
+      var lstmOn = false;
+      if (window.SignBridgeLiveTest &&
           typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();
-        recogLabel = recogLabel === "model ready" ? "model + LSTM" : "glosses + LSTM";
+        lstmOn = true;
+        recogLabel = recogLabel === "model ready" ? "model + LSTM" : "Holistic · LSTM";
       }
 
       SB.$("#mirrorToggle").classList.toggle("is-on", !!SB.settings.mirror);
@@ -526,22 +534,26 @@ SB.TranslateView = function () {
       setPill("live");
       refreshCapturePanelVisibility();
       if (st) {
-        st.innerHTML = live().hasClassifier()
-          ? '<span class="dot"></span>Live recognition on — sign Hello / Yes / Peace / You…'
-          : '<span class="dot"></span>Camera ready — landmarks only (no classifier attached).';
+        st.innerHTML = lstmOn
+          ? '<span class="dot"></span>Live recognition on — Holistic + LSTM (<code>signbridge_lstm.keras</code>).'
+          : live().hasClassifier()
+            ? '<span class="dot"></span>Live recognition on — trained classifier attached.'
+            : '<span class="dot"></span>Camera ready — landmarks only. Press 1–9 or Watch demo for sentence words.';
       }
       if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
       if (transcript && transcript.setLiveHint) {
-        transcript.setLiveHint(live().hasClassifier()
-          ? "Open hand → Hello, fist → Yes, V → Peace, point → You. CURRENT SIGN updates as you hold."
-          : "Landmarks only — attach a classifier to fill the transcript.");
+        transcript.setLiveHint(lstmOn
+          ? "Words stream here from the Keras LSTM when a 30-frame Holistic window is confident."
+          : live().hasClassifier()
+            ? "Words stream here as one sentence when the model is confident."
+            : "Live tracks hands. For transcript words: Demo keys <span class=\"kbd\">1</span>–<span class=\"kbd\">9</span>, Watch demo, or attach a trained classifier.");
       }
 
-      SB.toast(live().hasClassifier()
-        ? (live()._classifierKind === "handshape"
-          ? "Live on — landmark glosses → CURRENT SIGN + transcript"
-          : "Live engine on — hand tracking + your classifier")
-        : "Live on — landmarks only (no recognizer). Demo keys still work.", "ok");
+      SB.toast(lstmOn
+        ? "Live on — Holistic tracking + Keras LSTM"
+        : live().hasClassifier()
+          ? "Live engine on — hand tracking + your classifier"
+          : "Live on — landmarks only. Use Demo phrases for accurate transcript words.", "ok");
       try {
         var pill = SB.$("#enginePill");
         if (pill) SB.$(".pill-text", pill).textContent = "Live · " + recogLabel;

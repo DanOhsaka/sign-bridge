@@ -9,7 +9,8 @@
      Inference canvas (overlay stays full-res)
            │
            ▼ requestVideoFrameCallback + busy gate + watchdog
-     HandLandmarker in Web Worker (default; Holistic if ?holistic=1
+     Holistic Landmarker in Web Worker (default for Live LSTM;
+     HandLandmarker if ?holistic=0
      or while training records — pose needed for LSTM)
            │
            ├── left/right hand landmarks ──► UI (always) + classify (½)
@@ -76,7 +77,9 @@ SB.LiveEngine = function () {
     var q = (typeof location !== "undefined" && location.search) || "";
     showDebugTrack = /(?:^|[?&])debugTrack=1(?:&|$)/.test(q);
     forceCpu = /(?:^|[?&])forceCpu=1(?:&|$)/.test(q);
-    forceHolistic = /(?:^|[?&])holistic=1(?:&|$)/.test(q);
+    /* Live defaults to Holistic so LSTM (/api/predict) gets pose+hands.
+       Opt out with ?holistic=0; keep ?holistic=1 as an explicit force-on. */
+    forceHolistic = !/(?:^|[?&])holistic=0(?:&|$)/.test(q);
   } catch (e) {}
   modelKind = forceHolistic ? "holistic" : "hands";
 
@@ -264,12 +267,19 @@ SB.LiveEngine = function () {
   function desiredModel() {
     if (forceHolistic) return "holistic";
     try {
+      if (/(?:^|[?&])holistic=0(?:&|$)/.test(
+            (typeof location !== "undefined" && location.search) || "")) {
+        return "hands";
+      }
+    } catch (e0) {}
+    try {
       if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" &&
           SB.DataCapture.isRecording()) {
         return "holistic";
       }
     } catch (e) {}
-    return "hands";
+    /* Default Live path: Holistic for LSTM phrase recognition */
+    return "holistic";
   }
 
   function applyInferCap() {
