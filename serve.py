@@ -160,7 +160,12 @@ class Handler(SimpleHTTPRequestHandler):
 
 
     def _proxy_translate(self):
-        """Same-origin MyMemory proxy for TTS (CORS-safe)."""
+        """Same-origin MyMemory proxy for TTS (CORS-safe).
+
+        Normalizes ALL-CAPS ASL glosses (HELLO→Hello) and applies a small
+        glossary so Hello/HELLO reliably become Hola / こんにちは / etc.
+        Never returns the English source as a "translation".
+        """
         length = int(self.headers.get("Content-Length") or 0)
         raw = self.rfile.read(length) if length else b"{}"
         try:
@@ -174,7 +179,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(payload)
             return
 
-        q = str((data or {}).get("q") or "").strip()[:450]
+        q = " ".join(str((data or {}).get("q") or "").split())[:450]
         source = str((data or {}).get("source") or "en").split("-")[0].lower()
         target = str((data or {}).get("target") or "en").split("-")[0].lower()
         if not q:
@@ -194,9 +199,136 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(payload)
             return
 
+        glossary = {
+            "hello": {
+                "es": "Hola", "fr": "Bonjour", "de": "Hallo", "it": "Ciao",
+                "pt": "Olá", "zh": "你好", "ja": "こんにちは", "ko": "안녕하세요",
+                "hi": "नमस्ते", "ar": "مرحبا",
+            },
+            "hi": {
+                "es": "Hola", "fr": "Salut", "de": "Hi", "it": "Ciao",
+                "pt": "Oi", "zh": "嗨", "ja": "こんにちは", "ko": "안녕",
+                "hi": "नमस्ते", "ar": "مرحبا",
+            },
+            "my": {
+                "es": "mi", "fr": "mon", "de": "mein", "it": "mio",
+                "pt": "meu", "zh": "我的", "ja": "私の", "ko": "나의",
+                "hi": "मेरा", "ar": "لي",
+            },
+            "name": {
+                "es": "nombre", "fr": "nom", "de": "Name", "it": "nome",
+                "pt": "nome", "zh": "名字", "ja": "名前", "ko": "이름",
+                "hi": "नाम", "ar": "اسم",
+            },
+            "yes": {
+                "es": "Sí", "fr": "Oui", "de": "Ja", "it": "Sì",
+                "pt": "Sim", "zh": "是", "ja": "はい", "ko": "네",
+                "hi": "हाँ", "ar": "نعم",
+            },
+            "no": {
+                "es": "No", "fr": "Non", "de": "Nein", "it": "No",
+                "pt": "Não", "zh": "不", "ja": "いいえ", "ko": "아니요",
+                "hi": "नहीं", "ar": "لا",
+            },
+            "thanks": {
+                "es": "Gracias", "fr": "Merci", "de": "Danke", "it": "Grazie",
+                "pt": "Obrigado", "zh": "谢谢", "ja": "ありがとう",
+                "ko": "감사합니다", "hi": "धन्यवाद", "ar": "شكرا",
+            },
+            "thank": {
+                "es": "Gracias", "fr": "Merci", "de": "Danke", "it": "Grazie",
+                "pt": "Obrigado", "zh": "谢谢", "ja": "ありがとう",
+                "ko": "감사합니다", "hi": "धन्यवाद", "ar": "شكرا",
+            },
+            "please": {
+                "es": "Por favor", "fr": "S'il vous plaît", "de": "Bitte",
+                "it": "Per favore", "pt": "Por favor", "zh": "请",
+                "ja": "お願いします", "ko": "부탁합니다", "hi": "कृपया",
+                "ar": "من فضلك",
+            },
+            "goodbye": {
+                "es": "Adiós", "fr": "Au revoir", "de": "Tschüss",
+                "it": "Arrivederci", "pt": "Adeus", "zh": "再见",
+                "ja": "さようなら", "ko": "안녕히 가세요", "hi": "अलविदा",
+                "ar": "مع السلامة",
+            },
+            "thank you": {
+                "es": "Gracias", "fr": "Merci", "de": "Danke", "it": "Grazie",
+                "pt": "Obrigado", "zh": "谢谢", "ja": "ありがとう",
+                "ko": "감사합니다", "hi": "धन्यवाद", "ar": "شكرا",
+            },
+            "my name": {
+                "es": "Me llamo", "fr": "Je m'appelle", "de": "Ich heiße",
+                "it": "Mi chiamo", "pt": "Meu nome é", "zh": "我叫",
+                "ja": "私の名前は", "ko": "제 이름은", "hi": "मेरा नाम",
+                "ar": "اسمي",
+            },
+            "hello my name": {
+                "es": "Hola, me llamo", "fr": "Bonjour, je m'appelle",
+                "de": "Hallo, ich heiße", "it": "Ciao, mi chiamo",
+                "pt": "Olá, meu nome é", "zh": "你好，我叫",
+                "ja": "こんにちは、私の名前は", "ko": "안녕하세요, 제 이름은",
+                "hi": "नमस्ते, मेरा नाम", "ar": "مرحبا، اسمي",
+            },
+        }
+
+        def normalize(text):
+            s = " ".join(str(text or "").split())
+            letters = "".join(ch for ch in s if ch.isalpha())
+            if len(letters) >= 2 and letters == letters.upper():
+                return " ".join(
+                    w[:1].upper() + w[1:].lower() if w else w
+                    for w in s.lower().split(" ")
+                )
+            return s
+
+        def glossary_lookup(text):
+            key = " ".join(str(text or "").split()).lower()
+            row = glossary.get(key)
+            if row and row.get(target):
+                return row[target]
+            parts = key.split(" ")
+            if len(parts) < 2:
+                return None
+            out = []
+            for part in parts:
+                r = glossary.get(part)
+                if not r or not r.get(target):
+                    return None
+                out.append(r[target])
+            return " ".join(out)
+
+        def looks_untranslated(source_text, translated):
+            out = str(translated or "").strip()
+            if not out or "MYMEMORY WARNING" in out.upper():
+                return True
+            if out.lower() == "testvalue":
+                return True
+            if out.lower() == str(source_text or "").strip().lower():
+                return True
+            if target in ("ja", "zh", "ko", "ar", "hi"):
+                src_letters = "".join(
+                    ch for ch in str(source_text or "") if ("A" <= ch <= "Z") or ("a" <= ch <= "z")
+                )
+                if src_letters and all(ord(ch) < 128 for ch in out):
+                    return True
+            return False
+
+        normalized = normalize(q)
+        gloss = glossary_lookup(normalized) or glossary_lookup(q)
+        if gloss:
+            payload = json.dumps({"translatedText": gloss}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
+
+        query = normalized or q
         url = (
             "https://api.mymemory.translated.net/get?q="
-            + urllib.request.quote(q)
+            + urllib.request.quote(query)
             + "&langpair="
             + urllib.request.quote(source + "|" + target)
         )
@@ -206,7 +338,7 @@ class Handler(SimpleHTTPRequestHandler):
             out = (
                 upstream.get("responseData") or {}
             ).get("translatedText")
-            if not out or "MYMEMORY WARNING" in str(out).upper():
+            if not out or looks_untranslated(q, out) or looks_untranslated(query, out):
                 payload = json.dumps({
                     "error": "Upstream translate failed",
                     "detail": upstream.get("responseDetails"),
