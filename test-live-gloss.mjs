@@ -98,23 +98,51 @@ const pipeline = await page.evaluate(async () => {
   SB.Engine.getMode = () => mode;
 
   const tok = { text: "Hello", conf: 0.88, glyph: "👋", source: "live" };
-  /* Fire several times to satisfy confirm hold */
-  for (let i = 0; i < 8; i++) {
+  /* Fire many times — must append Hello only once while pose held */
+  for (let i = 0; i < 20; i++) {
     SB.Engine._result(tok);
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 40));
   }
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 350));
+
+  /* Same gloss again should still not duplicate */
+  for (let i = 0; i < 10; i++) {
+    SB.Engine._result(tok);
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  await new Promise((r) => setTimeout(r, 200));
+
+  /* Pose change → Yes should append once */
+  const tokYes = { text: "Yes", conf: 0.9, glyph: "✊", source: "live" };
+  for (let i = 0; i < 12; i++) {
+    SB.Engine._result(tokYes);
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  await new Promise((r) => setTimeout(r, 300));
+
+  /* Hand leave unlocks; Hello can fire again */
+  SB.Engine._hands(0);
+  await new Promise((r) => setTimeout(r, 50));
+  SB.Engine._hands(1);
+  for (let i = 0; i < 12; i++) {
+    SB.Engine._result(tok);
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  await new Promise((r) => setTimeout(r, 300));
 
   const current = document.getElementById("txCurrentWord");
   const words = Array.from(document.querySelectorAll("#transcript .word")).map(
-    (w) => w.dataset.text || w.textContent.trim()
+    (w) => (w.dataset.text || w.textContent).replace(/\s+/g, " ").trim()
   );
+  const helloCount = words.filter((w) => /^hello$/i.test(w)).length;
+  const yesCount = words.filter((w) => /^yes$/i.test(w)).length;
   const hasClassifier = eng.hasClassifier();
   return {
     hasClassifier,
     currentSign: current ? current.textContent.trim() : null,
     words,
-    emptyTitle: (document.querySelector("#transcript .empty-title") || {}).textContent || null,
+    helloCount,
+    yesCount,
   };
 });
 
@@ -125,7 +153,9 @@ const okCurrent =
   pipeline.currentSign &&
   pipeline.currentSign !== "—" &&
   /hello|hand|yes|peace/i.test(pipeline.currentSign);
-const okWords = pipeline.words.some((w) => /hello/i.test(w));
+const okOnce =
+  pipeline.helloCount === 2 && /* once held + once after hand leave */
+  pipeline.yesCount === 1;
 
 await browser.close();
 
@@ -133,9 +163,18 @@ if (!okClassify) {
   console.error("FAIL: classifier did not return a gloss for open hand");
   process.exit(1);
 }
-if (!okCurrent && !okWords) {
-  console.error("FAIL: CURRENT SIGN / transcript did not receive Hello token");
+if (!okCurrent) {
+  console.error("FAIL: CURRENT SIGN did not update");
   process.exit(1);
 }
-console.log("PASS: classifier fires; confirm→CURRENT SIGN/transcript works");
+if (!okOnce) {
+  console.error(
+    "FAIL: expected Hello×2 (hold+re-raise) and Yes×1, got",
+    pipeline.helloCount,
+    pipeline.yesCount,
+    pipeline.words
+  );
+  process.exit(1);
+}
+console.log("PASS: one gloss per pose; re-fire only after hand leave / pose change");
 process.exit(0);

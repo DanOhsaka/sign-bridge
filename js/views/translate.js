@@ -12,29 +12,30 @@ window.SB = window.SB || {};
 SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
-  var lastPrediction = null;
-  var lastPredictionTime = 0;
   /* Adaptive confirm: high-confidence static glosses commit faster. */
-  var pending = null; /* { text, conf, source, firstMs, lastMs } */
+  var pending = null; /* { text, conf, source, firstMs, lastMs, glyph, alt } */
   var confirmTimer = null;
+  /* Same gloss appends once until pose changes or hand leaves the frame. */
+  var lockedGloss = null; /* lowercase text last committed while hand stayed up */
+  var poseChangeNeeded = false; /* after commit, require a different held gloss */
 
   function live() { return SB.Engine.getLiveEngine(); }
 
-  function debounceMsFor(conf) {
-    conf = typeof conf === "number" ? conf : 0;
-    /* Live glosses change often — keep debounce short so transcript fills. */
-    if (conf >= 0.85) return 380;
-    if (conf >= 0.6) return 650;
-    return 900;
-  }
-
   function holdMsFor(conf) {
     conf = typeof conf === "number" ? conf : 0;
-    /* Short holds so CURRENT SIGN → transcript keeps up with Live landmarks. */
-    if (conf >= 0.85) return 80;
-    if (conf >= 0.65) return 140;
-    if (conf >= 0.5) return 220;
+    if (conf >= 0.85) return 100;
+    if (conf >= 0.65) return 160;
+    if (conf >= 0.5) return 240;
     return 320;
+  }
+
+  function glossKey(text) {
+    return String(text || "").trim().toLowerCase();
+  }
+
+  function clearGlossLock() {
+    lockedGloss = null;
+    poseChangeNeeded = false;
   }
 
   function ensureLiveRecognizer() {
@@ -53,17 +54,12 @@ SB.TranslateView = function () {
 
   function commitToken(tok, waitedMs) {
     if (!tok || !tok.text) return;
-    var now = Date.now();
-    var textKey = String(tok.text).trim().toLowerCase();
-    if (
-      textKey &&
-      textKey === lastPrediction &&
-      now - lastPredictionTime < debounceMsFor(tok.conf)
-    ) {
-      return;
-    }
-    lastPrediction = textKey;
-    lastPredictionTime = now;
+    var textKey = glossKey(tok.text);
+    /* Hard lock: never re-append the same gloss until pose change / hand leave */
+    if (textKey && textKey === lockedGloss) return;
+
+    lockedGloss = textKey;
+    poseChangeNeeded = true;
     transcript.addToken(tok);
     spotlight.show(tok);
     try {
@@ -89,31 +85,53 @@ SB.TranslateView = function () {
     if (!tok || !tok.text) return;
     var now = performance.now();
     var text = String(tok.text).trim();
+    var textKey = glossKey(text);
     var conf = typeof tok.conf === "number" ? tok.conf : 0;
     var hold = holdMsFor(conf);
 
-    if (pending && pending.text === text) {
+    /* Still preview the active reading, but do not re-queue a locked gloss */
+    if (textKey && textKey === lockedGloss) {
+      previewCurrent(tok);
+      clearPending();
+      return;
+    }
+
+    /* After a commit, ignore the same family until a *different* gloss is held */
+    if (poseChangeNeeded && textKey === lockedGloss) {
+      previewCurrent(tok);
+      return;
+    }
+
+    if (pending && glossKey(pending.text) === textKey) {
       pending.lastMs = now;
       pending.conf = Math.max(pending.conf, conf);
+      if (tok.glyph) pending.glyph = tok.glyph;
+      if (tok.alt) pending.alt = tok.alt;
       previewCurrent({
         text: pending.text,
         conf: pending.conf,
-        glyph: tok.glyph,
-        alt: tok.alt,
+        glyph: pending.glyph,
+        alt: pending.alt,
       });
       if (now - pending.firstMs >= holdMsFor(pending.conf)) {
         var waited = now - pending.firstMs;
         var out = {
           text: pending.text,
           conf: pending.conf,
-          alt: tok.alt,
-          glyph: tok.glyph,
+          alt: pending.alt,
+          glyph: pending.glyph,
           source: tok.source || pending.source || "live",
         };
         clearPending();
         commitToken(out, waited);
       }
       return;
+    }
+
+    /* New distinct gloss → unlock prior lock and start a fresh hold */
+    if (lockedGloss && textKey && textKey !== lockedGloss) {
+      lockedGloss = null;
+      poseChangeNeeded = false;
     }
 
     clearPending();
@@ -123,17 +141,23 @@ SB.TranslateView = function () {
       source: tok.source || "live",
       firstMs: now,
       lastMs: now,
+      glyph: tok.glyph,
+      alt: tok.alt,
     };
     previewCurrent(tok);
     confirmTimer = setTimeout(function () {
-      if (!pending || pending.text !== text) return;
+      if (!pending || glossKey(pending.text) !== textKey) return;
+      if (textKey === lockedGloss) {
+        clearPending();
+        return;
+      }
       var waited = performance.now() - pending.firstMs;
       var out = {
         text: pending.text,
         conf: pending.conf,
         source: pending.source,
-        glyph: tok.glyph,
-        alt: tok.alt,
+        glyph: pending.glyph,
+        alt: pending.alt,
       };
       clearPending();
       commitToken(out, waited);
@@ -182,7 +206,7 @@ SB.TranslateView = function () {
     );
 
 
-    /* hand-presence â†’ status line pulse */
+    /* hand-presence → status line pulse; leaving frame unlocks gloss re-fire */
     SB.Engine.on("hands", function (count) {
       var st = SB.$("#stageStatus");
       if (!st) return;
@@ -200,7 +224,7 @@ SB.TranslateView = function () {
         st.innerHTML = '<span class="dot"></span>Hand detected — ' +
           (live().hasClassifier()
             ? (live()._classifierKind === "handshape"
-              ? "reading handshape → transcript…"
+              ? "reading gloss → transcript (one word until pose changes)…"
               : "recognizing…")
             : (overlayOn
               ? "landmark overlay on — no classifier (Demo keys still work)."
@@ -209,6 +233,12 @@ SB.TranslateView = function () {
       } else {
         st.classList.remove("is-hands");
         st.innerHTML = '<span class="dot"></span>Move a hand into view…';
+        /* Hand left → allow the same gloss again on next raise */
+        clearGlossLock();
+        clearPending();
+        if (SB.HandshapeClassifier && SB.HandshapeClassifier.reset) {
+          try { SB.HandshapeClassifier.reset(); } catch (e) {}
+        }
       }
     });
 
@@ -428,6 +458,8 @@ SB.TranslateView = function () {
 
     setPill("demo");
     refreshCapturePanelVisibility();
+    clearGlossLock();
+    clearPending();
     if (transcript && transcript.setStatus) transcript.setStatus("Idle", false);
     if (transcript && transcript.setLiveHint) {
       var hint = document.getElementById("txEmptyHint");

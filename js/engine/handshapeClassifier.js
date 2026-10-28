@@ -31,6 +31,9 @@ window.SB.HandshapeClassifier = (function () {
 
   var history = [];
   var HIST = 7;
+  /* After emitting a stable gloss, suppress re-emits of the same label until
+     a different shape wins majority (pose change) or reset() on hand leave. */
+  var lastEmitted = null;
 
   function pt(feats, i) {
     return { x: feats[i * 3], y: feats[i * 3 + 1], z: feats[i * 3 + 2] };
@@ -193,23 +196,35 @@ window.SB.HandshapeClassifier = (function () {
     }
     /* Emit as soon as we have 2 agreeing frames (fast CURRENT SIGN). */
     if (bestN < 2 && history.length < 3) {
-      /* Still preview the latest raw guess with slightly lower conf */
       return {
         text: next.text,
         conf: Math.max(0.42, next.conf * 0.85),
         glyph: next.glyph,
         alt: next.alt,
         source: "live",
+        _preview: true,
       };
     }
-    var out = {
+    var key = String(bestT).toLowerCase();
+    /* Same pose still held → keep previewing but mark as sticky (no re-fire). */
+    if (lastEmitted && key === lastEmitted) {
+      return {
+        text: bestT,
+        conf: Math.min(0.95, (bestTok.conf || 0.6) + bestN * 0.04),
+        glyph: bestTok.glyph || "",
+        alt: bestTok.alt || [],
+        source: "live",
+        _sticky: true,
+      };
+    }
+    lastEmitted = key;
+    return {
       text: bestT,
       conf: Math.min(0.95, (bestTok.conf || 0.6) + bestN * 0.04),
       glyph: bestTok.glyph || "",
       alt: bestTok.alt || [],
       source: "live",
     };
-    return out;
   }
 
   function classify(feats) {
@@ -223,6 +238,7 @@ window.SB.HandshapeClassifier = (function () {
 
   function reset() {
     history = [];
+    lastEmitted = null;
   }
 
   return {
