@@ -13,7 +13,6 @@ SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
   var lastPrediction = null;
-  var lastPredictionTime = 0;
 
   function live() { return SB.Engine.getLiveEngine(); }
 
@@ -45,26 +44,20 @@ SB.TranslateView = function () {
           return;
         }
 
-        var now = Date.now();
-              
-        if (
-          result.prediction === lastPrediction &&
-          now - lastPredictionTime < 2000
-        ) {
+        if (result.prediction === lastPrediction) {
           return;
         }
-        
+
         lastPrediction = result.prediction;
-        lastPredictionTime = now;
 
         var token = {
           text: result.prediction,
-          conf: result.confidence
+          conf: result.confidence,
+          source: "live"
         };
 
         transcript.addToken(token);
         spotlight.show(token);
-        transcript.endUtterance();
 
         console.log(
           "SignBridge transcript updated:",

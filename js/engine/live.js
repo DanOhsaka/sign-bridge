@@ -9,7 +9,7 @@
      Inference canvas ≤640px
            │
            ▼ requestVideoFrameCallback + busy gate
-     HolisticLandmarker in Web Worker (same model as dev/stan)
+     Pose Landmarker Lite + Hand Landmarker in a Web Worker
            │
            ├── left/right hand landmarks ──► classifier / recognition
            ├── pose landmarks ──► LSTM frame normalizer
@@ -33,7 +33,7 @@ SB.LiveEngine = function () {
   var state = "off";
   var classifier = null;
 
-  var landmarker = null;   /* main-thread fallback only (HolisticLandmarker) */
+  var landmarker = null;   /* main-thread fallback only */
   var worker = null;
   var workerReady = false;
   var useWorker = false;
@@ -68,6 +68,10 @@ SB.LiveEngine = function () {
 
   var leftFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
   var rightFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
+  /* One missed detect should not erase the skeleton. */
+  var HAND_HOLD_MS = 250;
+  var leftHoldUntil = 0;
+  var rightHoldUntil = 0;
   var leftUiBuf = [];
   var rightUiBuf = [];
   var leftPredBuf = [];
@@ -110,11 +114,11 @@ SB.LiveEngine = function () {
   ];
 
   // ----------------------------------------------------------
-  // Load HolisticLandmarker — prefer Web Worker, fall back to main
+  // Load pose + hand landmarkers — prefer Web Worker, fall back to main
   // ----------------------------------------------------------
 
   function loadLandmarker() {
-    console.log("Loading MediaPipe HolisticLandmarker…");
+    console.log("Loading MediaPipe pose and hand landmarkers…");
     return initWorker()
       .catch(function (err) {
         console.warn(
@@ -164,9 +168,9 @@ SB.LiveEngine = function () {
           stats.backend = "worker/" + ((msg.info && msg.info.delegate) || "GPU");
           worker.onmessage = onWorkerMessage;
           if (msg.info && msg.info.fallback) {
-            console.warn("Holistic GPU delegate failed, using CPU:", msg.info.fallback);
+            console.warn("GPU delegate failed, using CPU:", msg.info.fallback);
           }
-          console.log("MediaPipe HolisticLandmarker ready (" + stats.backend + ").");
+          console.log("MediaPipe pose + hand ready (" + stats.backend + ").");
           resolve();
           return;
         }
@@ -220,39 +224,97 @@ SB.LiveEngine = function () {
     }
   }
 
+  function handName(entry) {
+    var top = entry && entry[0];
+    if (!top) return "";
+    return top.categoryName || top.displayName || "";
+  }
+
+  function splitHands(handResults) {
+    var left = null;
+    var right = null;
+    var landmarks = (handResults && handResults.landmarks) || [];
+    var handed = (handResults && handResults.handedness) || [];
+    var i;
+    for (i = 0; i < landmarks.length; i++) {
+      var name = handName(handed[i]);
+      if (name === "Right") {
+        if (!right) right = landmarks[i];
+      } else if (name === "Left") {
+        if (!left) left = landmarks[i];
+      }
+    }
+    return {
+      left: left ? [left] : [],
+      right: right ? [right] : [],
+    };
+  }
+
   function initMainThreadLandmarker() {
     return import(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm"
     ).then(async function (visionModule) {
       var FilesetResolver = visionModule.FilesetResolver;
-      var HolisticLandmarker = visionModule.HolisticLandmarker;
+      var PoseLandmarker = visionModule.PoseLandmarker;
+      var HandLandmarker = visionModule.HandLandmarker;
 
       var vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
       );
 
-      var opts = {
-        baseOptions: {
-          modelAssetPath:
-            "https://storage.googleapis.com/mediapipe-models/" +
-            "holistic_landmarker/holistic_landmarker/float16/1/" +
-            "holistic_landmarker.task",
-          delegate: "GPU",
-        },
-        runningMode: "VIDEO",
-      };
+      var poseModel =
+        "https://storage.googleapis.com/mediapipe-models/" +
+        "pose_landmarker/pose_landmarker_lite/float16/1/" +
+        "pose_landmarker_lite.task";
+      var handModel =
+        "https://storage.googleapis.com/mediapipe-models/" +
+        "hand_landmarker/hand_landmarker/float16/1/" +
+        "hand_landmarker.task";
 
+      async function createPair(delegate) {
+        var pose = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: poseModel, delegate: delegate },
+          runningMode: "VIDEO",
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.4,
+          minPosePresenceConfidence: 0.4,
+          minTrackingConfidence: 0.4,
+        });
+        var hands = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: handModel, delegate: delegate },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.3,
+          minHandPresenceConfidence: 0.3,
+          minTrackingConfidence: 0.3,
+        });
+        return { pose: pose, hands: hands };
+      }
+
+      var pair;
       try {
-        landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
+        pair = await createPair("GPU");
         stats.backend = "main/GPU";
       } catch (gpuErr) {
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
-        opts.baseOptions.delegate = "CPU";
-        landmarker = await HolisticLandmarker.createFromOptions(vision, opts);
+        pair = await createPair("CPU");
         stats.backend = "main/CPU";
       }
 
-      console.log("MediaPipe HolisticLandmarker ready (" + stats.backend + ").");
+      landmarker = {
+        detectForVideo: function (image, timestamp) {
+          var pose = pair.pose.detectForVideo(image, timestamp);
+          var hands = pair.hands.detectForVideo(image, timestamp);
+          var split = splitHands(hands);
+          return {
+            leftHandLandmarks: split.left,
+            rightHandLandmarks: split.right,
+            poseLandmarks: pose.landmarks || [],
+          };
+        },
+      };
+
+      console.log("MediaPipe pose + hand ready (" + stats.backend + ").");
     });
   }
 
@@ -377,7 +439,7 @@ SB.LiveEngine = function () {
         lastStatsTick = performance.now();
         startInferenceLoop();
         startRenderLoop();
-        console.log("Live engine started (HolisticLandmarker, latest-frame pipeline).");
+        console.log("Live engine started (pose lite + hand landmarker).");
         return self;
       })
       .catch(function (err) {
@@ -419,6 +481,8 @@ SB.LiveEngine = function () {
     prevRaw.tMs = 0;
     leftFilter.reset();
     rightFilter.reset();
+    leftHoldUntil = 0;
+    rightHoldUntil = 0;
     stats.dropped = 0;
   }
 
@@ -552,9 +616,8 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
 
   function ingestResults(results, wallMs, mediaMs) {
-    /* Holistic already labels hands anatomically, exactly as dev/stan
-       consumed them. No handedness guessing or swap repair here: the
-       LSTM training frames came straight from these two arrays. */
+    /* Left and right were assigned by the detector before this point.
+       The LSTM training frames use these same two arrays. */
     var left = firstGroup(results.leftHandLandmarks);
     var right = firstGroup(results.rightHandLandmarks);
 
@@ -567,7 +630,8 @@ SB.LiveEngine = function () {
     rawHands.tMs = wallMs;
     rawHands.mediaMs = mediaMs;
 
-    var handCount = (left ? 1 : 0) + (right ? 1 : 0);
+    updateUiFromRaw(wallMs);
+    var handCount = (uiHands.left ? 1 : 0) + (uiHands.right ? 1 : 0);
     stats.hands = handCount;
     if (SB.Engine && SB.Engine._hands) SB.Engine._hands(handCount);
 
@@ -587,8 +651,6 @@ SB.LiveEngine = function () {
       }
     }
 
-    /* Update UI buffers immediately after measure (render loop will paint) */
-    updateUiFromRaw(wallMs);
     // Forward every detected frame to training and LSTM consumers,
     // independently of the optional single-hand classifier.
     if (window.TrainingRecorder &&
@@ -627,16 +689,20 @@ SB.LiveEngine = function () {
   function updateUiFromRaw(wallMs) {
     var tSec = wallMs / 1000;
     if (rawHands.left) {
+      leftHoldUntil = wallMs + HAND_HOLD_MS;
       uiHands.left = leftFilter.apply(tSec, rawHands.left, leftUiBuf);
-    } else {
+    } else if (!(uiHands.left && wallMs < leftHoldUntil)) {
       leftFilter.reset();
       uiHands.left = null;
+      leftHoldUntil = 0;
     }
     if (rawHands.right) {
+      rightHoldUntil = wallMs + HAND_HOLD_MS;
       uiHands.right = rightFilter.apply(tSec, rawHands.right, rightUiBuf);
-    } else {
+    } else if (!(uiHands.right && wallMs < rightHoldUntil)) {
       rightFilter.reset();
       uiHands.right = null;
+      rightHoldUntil = 0;
     }
   }
 

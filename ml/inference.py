@@ -78,9 +78,10 @@ class SignBridgeLSTM:
 
         X = np.expand_dims(sequence, axis=0)
 
-        probabilities = self.model.predict(
-            X,
-            verbose=0
+        # Direct forward pass. model.predict() rebuilds a
+        # one-sample prediction path on every live request.
+        probabilities = np.asarray(
+            self.model(X, training=False)
         )[0]
 
         predicted_index = int(np.argmax(probabilities))

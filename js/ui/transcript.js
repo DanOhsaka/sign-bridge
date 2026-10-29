@@ -57,12 +57,11 @@ SB.Transcript = function (container, opts) {
 
       var words = document.createElement("div");
       words.className = "bubble-words";
-      head.after(words);
 
       openBubble.appendChild(head);
       openBubble.appendChild(words);
       el.appendChild(openBubble);
-      openBubble.scrollIntoView({ block: "end", behavior: "smooth" });
+      scrollToLatest();
     }
     return openBubble;
   }
@@ -114,9 +113,14 @@ SB.Transcript = function (container, opts) {
       wordsBox.appendChild(span);
     }
 
-    b.scrollIntoView({ block: "end", behavior: "smooth" });
+    scrollToLatest();
     if (opts.onToken) opts.onToken(tok);
   };
+
+  /* Keep the newest guess at the bottom of the transcript pane. */
+  function scrollToLatest() {
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }
 
   /* end the current utterance */
   self.endUtterance = function () { openBubble = null; };

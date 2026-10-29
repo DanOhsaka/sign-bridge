@@ -16,8 +16,9 @@ from dataset import load_dataset
 SEQUENCE_LENGTH = 30
 FEATURE_COUNT = 146
 
-EPOCHS = 100
+EPOCHS = 40
 BATCH_SIZE = 8
+EARLY_STOPPING_PATIENCE = 8
 
 RANDOM_SEED = 42
 
@@ -144,7 +145,10 @@ print(
 
 
 # ---------------------------------------------------------
-# Build LSTM model
+# Build classifier
+# One GRU is enough for 30-frame, 3-class recordings.
+# The saved filename stays signbridge_lstm.keras so the
+# existing loader keeps working after retraining.
 # ---------------------------------------------------------
 
 number_of_classes = len(
@@ -161,26 +165,12 @@ model = tf.keras.Sequential([
         )
     ),
 
-    tf.keras.layers.LSTM(
-        128,
-        return_sequences=True
+    tf.keras.layers.GRU(
+        32
     ),
 
     tf.keras.layers.Dropout(
         0.2
-    ),
-
-    tf.keras.layers.LSTM(
-        64
-    ),
-
-    tf.keras.layers.Dropout(
-        0.2
-    ),
-
-    tf.keras.layers.Dense(
-        64,
-        activation="relu"
     ),
 
     tf.keras.layers.Dense(
@@ -226,6 +216,13 @@ print("Starting training...")
 print()
 
 
+early_stopping = tf.keras.callbacks.EarlyStopping(
+    monitor="val_loss",
+    patience=EARLY_STOPPING_PATIENCE,
+    restore_best_weights=True
+)
+
+
 history = model.fit(
 
     X_train,
@@ -239,6 +236,10 @@ history = model.fit(
     epochs=EPOCHS,
 
     batch_size=BATCH_SIZE,
+
+    callbacks=[
+        early_stopping
+    ],
 
     verbose=1
 )

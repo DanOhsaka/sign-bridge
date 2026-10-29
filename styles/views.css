@@ -306,10 +306,12 @@
 .transcript-card {
   display: flex;
   flex-direction: column;
-  min-height: 580px;
+  height: calc(100vh - 140px);
+  min-height: 420px;
   max-height: calc(100vh - 140px);
   position: sticky;
   top: 20px;
+  overflow: hidden;
 }
 .transcript-card > header {
   display: flex; align-items: center; gap: 8px;
@@ -321,8 +323,10 @@
 .transcript-card > header .icon-btn { width: 32px; height: 32px; font-size: 13px; }
 
 .transcript {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  scroll-behavior: smooth;
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
@@ -330,6 +334,7 @@
 }
 
 .bubble {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);
@@ -377,6 +382,14 @@
   display: flex;
   flex-wrap: wrap;
   gap: 3px 2px;
+}
+
+/* Live guesses are one sign per line so the pane can scroll. */
+.bubble.is-live .bubble-words {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .word {
@@ -910,7 +923,11 @@
    ============================================================ */
 @media (max-width: 1040px) {
   .view--translate { grid-template-columns: 1fr; }
-  .transcript-card { position: static; max-height: 520px; }
+  .transcript-card {
+    position: static;
+    height: 520px;
+    max-height: 520px;
+  }
   .params-grid { grid-template-columns: repeat(2, 1fr); }
   .practice-grid { grid-template-columns: 1fr; }
   .letter-pad { grid-template-columns: repeat(9, 1fr); }
