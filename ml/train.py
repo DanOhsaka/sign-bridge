@@ -13,7 +13,7 @@ from dataset import load_dataset
 # Training configuration
 # ---------------------------------------------------------
 
-SEQUENCE_LENGTH = 30
+SEQUENCE_LENGTH = 60
 FEATURE_COUNT = 146
 
 EPOCHS = 40

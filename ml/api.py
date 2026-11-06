@@ -47,8 +47,8 @@ app.add_middleware(
 
 class PredictionRequest(BaseModel):
     frames: list[dict] = Field(
-        min_length=30,
-        max_length=30
+        min_length=60,
+        max_length=60
     )
 
 

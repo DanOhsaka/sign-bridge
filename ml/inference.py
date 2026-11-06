@@ -7,7 +7,7 @@ import tensorflow as tf
 from .dataset import frame_to_features
 
 
-SEQUENCE_LENGTH = 30
+SEQUENCE_LENGTH = 60
 FEATURE_COUNT = 146
 
 
@@ -85,12 +85,18 @@ class SignBridgeLSTM:
         )[0]
 
         predicted_index = int(np.argmax(probabilities))
+        predicted_label = self.labels[predicted_index]
+        confidence = float(probabilities[predicted_index])
+
+        MIN_CONFIDENCE = 0.90
+
+        if confidence < MIN_CONFIDENCE:
+            predicted_label = "NONE"
+
 
         return {
-            "prediction": self.labels[predicted_index],
-            "confidence": float(
-                probabilities[predicted_index]
-            ),
+            "prediction": predicted_label,
+            "confidence": confidence,
             "probabilities": {
                 label: float(probabilities[index])
                 for index, label in enumerate(self.labels)

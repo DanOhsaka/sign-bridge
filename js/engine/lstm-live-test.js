@@ -3,12 +3,14 @@
 
     // Node proxy on the same origin. The server forwards to the Python model.
     const API_URL = "/api/predict";
-    const SEQUENCE_LENGTH = 30;
+    const SEQUENCE_LENGTH = 60;
     // Classify the latest 30 frames again after this many new detections.
     const STRIDE = 8;
     // One agreeing window is not enough; the next stride must match
     // before the transcript changes.
     const STABLE_COUNT = 2;
+
+    const MIN_CONFIDENCE = 0.90;
 
     let active = false;
     let sending = false;
@@ -86,28 +88,37 @@
     }
 
     function commitPrediction(result) {
-        if (!result || !result.prediction) {
-            return;
-        }
-
-        if (result.prediction === pendingLabel) {
-            pendingCount++;
-        } else {
-            pendingLabel = result.prediction;
-            pendingCount = 1;
-        }
-
-        if (pendingCount < STABLE_COUNT) {
-            return;
-        }
-
-        window.dispatchEvent(
-            new CustomEvent("signbridge:lstm-prediction", {
-                detail: result
-            })
-        );
+    if (!result || !result.prediction) {
+        return;
     }
 
+    // Reject predictions with insufficient confidence
+    if (
+        typeof result.confidence !== "number" ||
+        result.confidence < MIN_CONFIDENCE
+    ) {
+        pendingLabel = null;
+        pendingCount = 0;
+        return;
+    }
+
+    if (result.prediction === pendingLabel) {
+        pendingCount++;
+    } else {
+        pendingLabel = result.prediction;
+        pendingCount = 1;
+    }
+
+    if (pendingCount < STABLE_COUNT) {
+        return;
+    }
+
+    window.dispatchEvent(
+        new CustomEvent("signbridge:lstm-prediction", {
+            detail: result
+        })
+    );
+}
     async function sendPrediction(sequence, requestSession) {
 
         try {
@@ -130,6 +141,11 @@
             }
 
             const result = await response.json();
+                console.log("Raw LSTM prediction:", {
+                prediction: result.prediction,
+                confidence: result.confidence,
+                probabilities: result.probabilities
+                });
             if (!active || requestSession !== session) return;
 
             commitPrediction(result);
