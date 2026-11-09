@@ -516,7 +516,7 @@
     );
 
 
-    // Keep using the original storage function.
+    // The local server writes training-data/<LABEL>/<LABEL>_NNN.json.
     saveTrainingSample(sample);
 
 

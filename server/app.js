@@ -11,6 +11,7 @@ const cors = require("cors");
 const Database = require("./db");
 const authRoutes = require("./routes/auth");
 const predictRoutes = require("./routes/predict");
+const trainingRoutes = require("./routes/training");
 
 const app = express();
 
@@ -27,8 +28,9 @@ app.use(function (req, res, next) {
 app.use(express.json({ limit: "1mb" }));
 
 // Registered before the database gate. A missing MongoDB
-// connection must not block sign recognition.
+// connection must not block sign recognition or training capture.
 app.use("/api/predict", predictRoutes);
+app.use("/api/training", trainingRoutes);
 
 app.use("/api", async function (req, res, next) {
   try {
