@@ -2,7 +2,7 @@
     "use strict";
 
     // Node proxy on the same origin. The server forwards to the Python model.
-    const API_URL = "/api/predict";
+    const API_URL = "http://127.0.0.1:3000/api/predict";
     const SEQUENCE_LENGTH = 60;
     // Classify the latest 30 frames again after this many new detections.
     const STRIDE = 8;
@@ -10,7 +10,7 @@
     // before the transcript changes.
     const STABLE_COUNT = 2;
 
-    const MIN_CONFIDENCE = 0.90;
+    const MIN_CONFIDENCE = 0.80;
 
     let active = false;
     let sending = false;
