@@ -398,13 +398,146 @@
   -webkit-backdrop-filter: blur(8px);
 }
 
+/* ---------- Aceternity/BeUI: Camera-waiting stage loader ---------- */
+.stage-wait-fx {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 42%, rgba(52, 224, 192, 0.14), transparent 62%),
+    radial-gradient(ellipse 50% 40% at 70% 70%, rgba(139, 140, 255, 0.10), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-solid) 70%, transparent), color-mix(in srgb, var(--bg) 85%, transparent));
+}
+.stage.is-waiting .stage-wait-fx { display: block; }
+.stage-wait-beams {
+  position: absolute;
+  inset: -20%;
+  background:
+    repeating-linear-gradient(
+      115deg,
+      transparent 0 18px,
+      rgba(52, 224, 192, 0.05) 18px 19px,
+      transparent 19px 38px
+    );
+  mask-image: radial-gradient(ellipse 55% 50% at 50% 45%, #000 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 55% 50% at 50% 45%, #000 20%, transparent 75%);
+  animation: stageWaitBeam 10s linear infinite;
+  opacity: 0.7;
+}
+.stage-wait-orbits {
+  position: absolute;
+  left: 50%;
+  top: 32%;
+  width: 128px;
+  height: 128px;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 22px rgba(52, 224, 192, 0.28));
+}
+.stage-wait-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: rgba(52, 224, 192, 0.95);
+  border-right-color: rgba(139, 140, 255, 0.48);
+  animation: stageWaitSpin 2.8s linear infinite;
+  box-shadow: 0 0 32px rgba(52, 224, 192, 0.22);
+  will-change: transform;
+}
+.stage-wait-ring:nth-child(2) {
+  inset: 15px;
+  border-width: 2.75px;
+  border-top-color: rgba(139, 140, 255, 0.9);
+  border-right-color: rgba(52, 224, 192, 0.36);
+  animation-duration: 4.2s;
+  animation-direction: reverse;
+}
+.stage-wait-ring:nth-child(3) {
+  inset: 30px;
+  border-width: 2.5px;
+  border-top-color: rgba(52, 224, 192, 0.78);
+  border-left-color: rgba(139, 140, 255, 0.52);
+  border-right-color: transparent;
+  animation-duration: 2.1s;
+}
+.stage-wait-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #fff 0%, #b7fff0 22%, var(--teal) 55%, transparent 78%);
+  box-shadow:
+    0 0 12px 3px rgba(255, 255, 255, 0.65),
+    0 0 34px 12px rgba(52, 224, 192, 0.85),
+    0 0 64px 22px rgba(52, 224, 192, 0.42),
+    0 0 96px 34px rgba(139, 140, 255, 0.32);
+  animation: stageWaitPulse 2.8s ease-in-out infinite;
+}
+.stage-wait-core::after {
+  content: "";
+  position: absolute;
+  inset: -28px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 224, 192, 0.38) 0%, rgba(139, 140, 255, 0.16) 40%, transparent 72%);
+  animation: stageWaitHalo 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.stage.is-waiting .stage-overlay-state {
+  background: transparent;
+  backdrop-filter: none;
+}
+.stage.is-waiting .stage-overlay-copy {
+  margin-top: 128px;
+  padding-top: 12px;
+}
+.stage.is-waiting .overlay-title {
+  font-size: clamp(1.05rem, 2.2vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.stage.is-waiting .overlay-detail {
+  margin: 10px auto 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+@keyframes stageWaitSpin { to { transform: rotate(360deg); } }
+@keyframes stageWaitPulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.82; }
+  50% { transform: scale(1.14); opacity: 1; }
+}
+@keyframes stageWaitHalo {
+  0%, 100% { transform: scale(0.9); opacity: 0.55; }
+  50% { transform: scale(1.18); opacity: 1; }
+}
+@keyframes stageWaitBeam {
+  from { transform: translate3d(-4%, 0, 0) rotate(0.001deg); }
+  to { transform: translate3d(4%, 0, 0) rotate(0.001deg); }
+}
+[data-theme="light"] .stage-wait-fx {
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 42%, rgba(14, 159, 134, 0.12), transparent 62%),
+    radial-gradient(ellipse 50% 40% at 70% 70%, rgba(91, 91, 214, 0.08), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-solid) 78%, transparent), color-mix(in srgb, var(--bg) 88%, transparent));
+}
+
 /* Reduced motion: kill decorative motion, keep layout */
 @media (prefers-reduced-motion: reduce) {
   .ac-spotlight::before,
   .ac-beams path,
   .ac-text-shimmer,
   .logo-mark,
-  .toast {
+  .toast,
+  .stage-wait-ring,
+  .stage-wait-core,
+  .stage-wait-core::after,
+  .stage-wait-beams {
     animation: none !important;
   }
   .ac-wobble { transform: none !important; }

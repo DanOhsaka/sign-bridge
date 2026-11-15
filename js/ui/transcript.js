@@ -8,7 +8,7 @@
    Teaching design kept:
      • confidence is visible on every word (coloured underline)
      • low-confidence words unfold alternates inline
-     • source badge (Demo/Live) shown once for the stream
+     • source badge (Live) shown once for the stream
      • optional per-word timestamps + live-word pulse
      • aria-live so screen readers announce signing
    ============================================================ */
@@ -18,8 +18,7 @@ window.SB = window.SB || {};
 SB._TX_EMPTY_HTML =
   '<div class="empty tx-empty">' +
   '<div class="empty-title">Waiting for signs</div>' +
-  '<div class="empty-hint" id="txEmptyHint">Words stream here as one growing sentence. Press ' +
-  '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live for hand tracking.</div>' +
+  '<div class="empty-hint" id="txEmptyHint">Words stream here as one growing sentence when Live recognition is confident.</div>' +
   "</div>";
 
 function SB_formatClock(d) {
@@ -88,10 +87,8 @@ SB.Transcript = function (container, opts) {
       var meta = document.createElement("div");
       meta.className = "stream-meta";
       sourceEl = document.createElement("span");
-      sourceEl.className = "stream-src src-" + (tok.source || "demo");
-      sourceEl.textContent = tok.source === "live" || tok.source === "lstm"
-        ? "● Live"
-        : "● Demo";
+      sourceEl.className = "stream-src src-" + (tok.source || "live");
+      sourceEl.textContent = "● Live";
       meta.appendChild(sourceEl);
 
       var hint = document.createElement("span");
@@ -114,13 +111,11 @@ SB.Transcript = function (container, opts) {
       el.appendChild(stream);
       setWorkspaceStatus("Streaming", tok.source === "live" || tok.source === "lstm");
     } else if (sourceEl && tok.source) {
-      sourceEl.className = "stream-src src-" + tok.source;
-      sourceEl.textContent = tok.source === "live" || tok.source === "lstm"
-        ? "● Live"
-        : "● Demo";
+      sourceEl.className = "stream-src src-" + (tok.source || "live");
+      sourceEl.textContent = "● Live";
       setWorkspaceStatus(
-        tok.source === "live" || tok.source === "lstm" ? "Live" : "Streaming",
-        tok.source === "live" || tok.source === "lstm"
+        tok.source === "lstm" ? "Live" : "Streaming",
+        true
       );
     }
     return sentence;

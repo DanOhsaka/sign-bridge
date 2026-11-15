@@ -20,7 +20,8 @@ SB.mountEffects = function () {
 
   try {
     /* Three.js owns the deep atmosphere when available; keep CSS beams as fallback */
-    if (SB.mountThreeFX) {
+    var wantThree = !(SB.settings && SB.settings.threeFx === false);
+    if (wantThree && SB.mountThreeFX) {
       SB.mountThreeFX();
     }
     if (!document.documentElement.classList.contains("sb-has-three")) {

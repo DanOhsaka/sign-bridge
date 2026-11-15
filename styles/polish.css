@@ -105,7 +105,7 @@ body,
 .nav, .segmented, .stage, .spotlight, .stat, .param,
 .sign-card, .phrase-card, .letter-pad button, .feedback,
 .stage-card, .transcript-card, .arena, .etiquette,
-.auth-welcome, .auth-form-card, .quick-phrases, .demo-hint-bar,
+.auth-welcome, .auth-form-card, .demo-hint-bar,
 .spell-strip, .stage-status, .tx-head, .tx-actions, .tx-current,
 .stream-panel, .drawer, .toast, .theme-switch .ts-track {
   transition:
@@ -362,8 +362,15 @@ body { background-color: var(--bg); font-size: var(--fs-md); }
   z-index: 5;
 }
 .stage.is-starting .stage-overlay-state,
-.stage.is-error .stage-overlay-state {
+.stage.is-error .stage-overlay-state,
+.stage.is-waiting .stage-overlay-state {
   display: grid;
+}
+.stage-overlay-state .stage-overlay-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 36ch;
+  margin: 0 auto;
 }
 .stage-overlay-state .spinner {
   width: 28px;
