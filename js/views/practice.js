@@ -16,7 +16,7 @@ SB.PracticeView = function () {
   });
 
   var state = {
-    tab: "signs",
+    tab: "signs", /* signs | assess */
     target: null,
     sessionCorrect: 0,
     sessionTried: 0,
@@ -53,12 +53,11 @@ SB.PracticeView = function () {
     bindPad();
     bindKeyboard();
     bindReview();
-    bindPhraseDeck();
     renderMinipairs();
     resetFeedbackIdle();
     updateStats();
-    /* Start Live when Arena is already selected (e.g. deep link). */
-    if (state.tab === "arena") goLive();
+    /* Start Live when Assess is already selected (e.g. deep link). */
+    if (state.tab === "assess") goLive();
   }
 
   function renderMinipairs() {
@@ -74,21 +73,27 @@ SB.PracticeView = function () {
     });
   }
 
+  function showTab(tab) {
+    tab = tab === "assess" ? "assess" : "signs";
+    state.tab = tab;
+    SB.$$("#practiceTabs button").forEach(function (b) {
+      b.classList.toggle("is-on", b.dataset.tab === tab);
+    });
+    var signs = SB.$("#signsPane");
+    var assess = SB.$("#assessPane");
+    if (signs) signs.style.display = tab === "signs" ? "" : "none";
+    if (assess) assess.style.display = tab === "assess" ? "" : "none";
+    if (tab === "assess") {
+      goLive();
+    } else {
+      stopCamera({ silent: true });
+    }
+  }
+
   function bindTabs() {
     SB.$$("#practiceTabs button").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        SB.$$("#practiceTabs button").forEach(function (b) { b.classList.remove("is-on"); });
-        btn.classList.add("is-on");
-        state.tab = btn.dataset.tab;
-        var signs = SB.$("#signsPane");
-        var arena = SB.$("#arenaPane");
-        if (signs) signs.style.display = state.tab === "signs" ? "" : "none";
-        if (arena) arena.style.display = state.tab === "arena" ? "" : "none";
-        if (state.tab === "arena") {
-          goLive();
-        } else {
-          stopCamera({ silent: true });
-        }
+        showTab(btn.dataset.tab);
       });
     });
   }
@@ -255,7 +260,7 @@ SB.PracticeView = function () {
   }
 
   function startRecording() {
-    if (!cameraOn || recording || state.locked || state.tab !== "arena") return;
+    if (!cameraOn || recording || state.locked || state.tab !== "assess") return;
     var video = SB.$("#cam");
     var stream = video && video.srcObject;
     if (!stream) {
@@ -438,7 +443,7 @@ SB.PracticeView = function () {
   }
 
   function goLive() {
-    if (state.tab !== "arena") return;
+    if (state.tab !== "assess") return;
     if (liveStarting) return;
     cameraOn = true;
     liveStarting = true;
@@ -461,7 +466,7 @@ SB.PracticeView = function () {
       showHud: !!(SB.settings && SB.settings.perfHud),
     }).then(function () {
       liveStarting = false;
-      if (!cameraOn || state.tab !== "arena") {
+      if (!cameraOn || state.tab !== "assess") {
         try { live().stop(); } catch (eStop) {}
         return;
       }
@@ -511,13 +516,13 @@ SB.PracticeView = function () {
     setStageOverlay(
       "waiting",
       "Waiting for camera to be turned on",
-      "Open Arena and toggle Camera on to record letter clips."
+      "Open Assess and toggle Camera on to record letter clips."
     );
 
     if (!liveListenersBound) {
       liveListenersBound = true;
       SB.Engine.on("hands", function (count) {
-        if (state.tab !== "arena" || !cameraOn || recording) return;
+        if (state.tab !== "assess" || !cameraOn || recording) return;
         var st = SB.$("#stageStatus");
         if (!st || clipReady) return;
         if (count > 0) {
@@ -655,15 +660,8 @@ SB.PracticeView = function () {
         '<div class="sc-actions"><button type="button" class="btn btn-soft btn-sm" data-show>Practice →</button></div>' +
         "</div>";
       card.querySelector("[data-show]").addEventListener("click", function () {
-        var box = SB.$("#tryTranscript");
-        box.classList.add("is-show");
-        box.innerHTML = "";
-        SB.Engine.signPhrase(p.id, function (tok) {
-          var w = document.createElement("span");
-          w.className = "word " + SB.confClass(tok.conf);
-          w.textContent = (tok.glyph ? tok.glyph + " " : "") + tok.text;
-          box.appendChild(w);
-        });
+        showTab("assess");
+        SB.toast("Assess — record \"" + p.name + "\" handshape practice on Live cam", "ok");
       });
       grid.appendChild(card);
     });
@@ -830,7 +828,7 @@ SB.PracticeView = function () {
    * Pick = letter the learner taps; got = classifier vote over the clip.
    */
   function sign(letter) {
-    if (state.locked || state.tab !== "arena") return;
+    if (state.locked || state.tab !== "assess") return;
     if (recording) {
       SB.toast("Stop recording before grading", "info");
       return;
@@ -897,7 +895,7 @@ SB.PracticeView = function () {
 
   function bindKeyboard() {
     document.addEventListener("keydown", function (e) {
-      if (state.tab !== "arena") return;
+      if (state.tab !== "assess") return;
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
       var k = e.key.toUpperCase();
       if (/^[A-Z]$/.test(k)) {
@@ -946,36 +944,6 @@ SB.PracticeView = function () {
     SB.$("#ringNote").textContent = state.sessionCorrect + " / " + state.sessionTried + " this session";
 
     if (SB.PracticeView._rerenderReview) SB.PracticeView._rerenderReview();
-  }
-
-  function bindPhraseDeck() {
-    var deck = SB.$("#phraseDeck");
-    deck.innerHTML = "";
-    SB.PHRASES.forEach(function (p) {
-      var card = document.createElement("div");
-      card.className = "phrase-card";
-      card.innerHTML =
-        '<div class="pc-top"><span class="pc-glyph">' + p.emoji + "</span><h4>" + p.name + "</h4></div>" +
-        "<p>" + p.desc + "</p>" +
-        '<div class="pc-actions"><span class="badge badge-cat">' + p.cat + "</span>" +
-        '<button class="btn btn-soft btn-sm">Practice</button></div>';
-      var btn = card.querySelector(".pc-actions .btn");
-      btn.addEventListener("click", function () {
-        btn.disabled = true;
-        var t = new SB.Transcript(SB.$("#phraseResult"), {});
-        t.clear();
-        SB.Engine.signPhrase(p.id, function (tok) { t.addToken(tok); }).then(function () {
-          t.endUtterance();
-          progress.phrases[p.id] = progress.phrases[p.id] || { tried: 0, n: 0 };
-          progress.phrases[p.id].tried++;
-          progress.phrases[p.id].n++;
-          save();
-          btn.disabled = false;
-          SB.toast("Practiced \"" + p.name + "\"", "ok");
-        });
-      });
-      deck.appendChild(card);
-    });
   }
 
   var api = {

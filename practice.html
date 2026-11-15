@@ -61,12 +61,12 @@
 
     <main class="view view--practice">
       <div class="practice-head">
-        <h1>Practice arena
-          <small>Browse common signs, then drill letter rounds and phrase demos — the recognizer streams the reading back.</small>
+        <h1>Practice
+          <small>Browse common signs, then assess letter handshapes with Live camera record-and-grade.</small>
         </h1>
         <div class="segmented" id="practiceTabs">
           <button class="is-on" data-tab="signs">📖 Signs</button>
-          <button data-tab="arena">🎯 Arena</button>
+          <button data-tab="assess">🎯 Assess</button>
         </div>
       </div>
 
@@ -74,7 +74,7 @@
       <div id="signsPane">
         <div class="learn-hero practice-signs-hero">
           <h2>Common ASL signs</h2>
-          <p>Browse signs by category. Open a card and press <strong>Practice</strong> to watch it stream through the recognizer.</p>
+          <p>Browse signs by category. Open a card and press <strong>Practice</strong> to jump into Assess with the Live camera.</p>
         </div>
         <div class="learn-toolbar">
           <input class="input" id="learnSearch" placeholder="Search signs — try 'help', 'water', 'family'…" aria-label="Search signs">
@@ -84,11 +84,11 @@
         <div class="learn-grid" id="signGrid"></div>
       </div>
 
-      <!-- ══════════ Arena pane (prior rounds / drills) ══════════ -->
-      <div id="arenaPane" style="display:none">
+      <!-- ══════════ Assess pane (camera / record / grade / keyboard / stats) ══════════ -->
+      <div id="assessPane" style="display:none">
         <section class="card stage-card arena-live-card">
           <div class="stage-head">
-            <h2 class="arena-live-title">Live letter cam
+            <h2 class="arena-live-title">Live letter assess
               <small>Record a signing clip, stop, then pick the letter on the pad — we grade the clip with the letter classifier.</small>
             </h2>
             <div class="stage-toggles">
@@ -216,15 +216,6 @@
             </div>
           </details>
         </div>
-
-        <div id="phrasesPane" class="arena-phrases">
-          <div class="learn-hero practice-signs-hero" style="margin-top:28px">
-            <h2>Phrase drills</h2>
-            <p>Run common phrase demos and watch the recognizer stream each gloss back.</p>
-          </div>
-          <div class="try-transcript" id="phraseResult" aria-live="polite"></div>
-          <div class="deck" id="phraseDeck"></div>
-        </div>
       </div>
     </main>
   </div>
@@ -298,7 +289,7 @@
   <script src="js/engine/handStability.js?v=20261026p8"></script>
   <script src="js/engine/letterClassifier.js?v=20261115prac"></script>
   <script src="js/engine/live.js?v=20261028lstm"></script>
-  <script src="js/views/practice.js?v=20261115clip"></script>
+  <script src="js/views/practice.js?v=20261115assess"></script>
   <script src="js/views/settings.js?v=20261115three"></script>
   <script src="js/app.js?v=20261022l"></script>
 </body>
