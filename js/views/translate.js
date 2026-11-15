@@ -407,20 +407,30 @@ SB.TranslateView = function () {
     var stage = SB.$("#stage");
     var overlay = SB.$("#stageOverlay");
     if (!stage) return;
-    stage.classList.remove("is-starting", "is-error");
+    stage.classList.remove("is-starting", "is-error", "is-waiting");
     if (!kind) {
       if (overlay) overlay.hidden = true;
       return;
     }
-    stage.classList.add(kind === "error" ? "is-error" : "is-starting");
+    var klass = kind === "error" ? "is-error"
+      : kind === "waiting" ? "is-waiting"
+      : "is-starting";
+    stage.classList.add(klass);
     if (!overlay) return;
     overlay.hidden = false;
+    overlay.dataset.kind = kind;
     var titleEl = SB.$(".overlay-title", overlay);
     var detailEl = SB.$(".overlay-detail", overlay);
     var spin = SB.$(".spinner", overlay);
+    var waitFx = SB.$(".stage-wait-fx", overlay);
     if (titleEl) titleEl.textContent = title || "";
-    if (detailEl) detailEl.textContent = detail || "";
+    if (detailEl) {
+      detailEl.textContent = detail || "";
+      detailEl.hidden = !detail;
+    }
+    /* Classic spinner for starting; BeUI/Aceternity orbits for waiting. */
     if (spin) spin.style.display = kind === "starting" ? "" : "none";
+    if (waitFx) waitFx.style.display = kind === "waiting" ? "" : "none";
   }
 
   function syncCameraChip() {
@@ -449,11 +459,15 @@ SB.TranslateView = function () {
     if (stage) {
       stage.classList.remove("is-cam", "is-mirror", "is-starting", "is-error");
     }
-    setStageOverlay(null);
+    setStageOverlay(
+      "waiting",
+      "Waiting for camera to be turned on",
+      "Toggle Camera on to restart Live tracking."
+    );
     var st = SB.$("#stageStatus");
     if (st) {
       st.classList.remove("is-hands");
-      st.innerHTML = '<span class="dot"></span>Camera off — turn Camera on to restart Live tracking.';
+      st.innerHTML = '<span class="dot"></span>Camera off — waiting for Camera to be turned on.';
     }
     if (transcript && transcript.setStatus) transcript.setStatus("Idle", false);
     if (transcript && transcript.setLiveHint) {

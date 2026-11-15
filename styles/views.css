@@ -15,7 +15,7 @@
   box-sizing: border-box;
 }
 
-/* Never clip Quick Phrases / spotlight under the stage card */
+/* Never clip spotlight / stage chrome under the stage card */
 .stage-card { overflow: visible; }
 
 .stage-head {
@@ -64,7 +64,8 @@
    when Demo empty-state is hidden (and tip bar is gone). Beat polish's
    `.stage:not(.is-cam) { aspect-ratio: auto }` so the overlay has room. */
 .stage.is-starting:not(.is-cam),
-.stage.is-error:not(.is-cam) {
+.stage.is-error:not(.is-cam),
+.stage.is-waiting:not(.is-cam) {
   aspect-ratio: 16 / 9;
   min-height: 280px;
   height: auto;
@@ -101,10 +102,11 @@
 .stage.is-cam.is-mirror video {
   transform: scaleX(-1);
 }
-/* Never let the demo placeholder sit above live / starting / error overlays */
+/* Never let the demo placeholder sit above live / starting / error / waiting overlays */
 .stage.is-cam .stage-demo,
 .stage.is-starting .stage-demo,
-.stage.is-error .stage-demo {
+.stage.is-error .stage-demo,
+.stage.is-waiting .stage-demo {
   display: none !important;
 }
 
@@ -200,9 +202,11 @@
 .stage.is-cam ~ .demo-hint-bar,
 .stage.is-starting ~ .demo-hint-bar,
 .stage.is-error ~ .demo-hint-bar,
+.stage.is-waiting ~ .demo-hint-bar,
 .stage-card:has(.stage.is-cam) .demo-hint-bar,
 .stage-card:has(.stage.is-starting) .demo-hint-bar,
-.stage-card:has(.stage.is-error) .demo-hint-bar {
+.stage-card:has(.stage.is-error) .demo-hint-bar,
+.stage-card:has(.stage.is-waiting) .demo-hint-bar {
   display: none !important;
 }
 .demo-hint-bar .demo-hint,
@@ -370,32 +374,6 @@
   box-shadow: 0 0 12px rgba(251,191,36,.2);
 }
 
-/* Quick phrases strip */
-.quick-phrases {
-  padding: 14px 20px 16px;
-  border-top: 1px solid var(--border);
-  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
-}
-.quick-phrases .q-label {
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: .08em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  margin-bottom: 10px;
-}
-.q-chips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  min-height: 36px;
-}
-.q-chips .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
 /* ============================================================
    TRANSCRIPT — interactive LIVE TRANSCRIPT workspace
    ============================================================ */
@@ -403,7 +381,7 @@
   display: flex;
   flex-direction: column;
   /* Fill useful space without forcing a full-viewport opaque slab that
-     buries the Three.js atmosphere (and used to push Quick Phrases off-screen). */
+     buries the Three.js atmosphere. */
   min-height: min(640px, calc(100vh - 160px));
   max-height: calc(100vh - 140px);
   height: auto;
@@ -1222,6 +1200,82 @@
 .fact-card .fc-ico { font-size: 28px; flex: none; }
 .fact-card p { color: var(--text-2); font-size: var(--fs-sm); }
 .fact-card p strong { color: var(--text); }
+
+.learn-sections { margin-top: 8px; }
+.learn-resources {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.learn-resources .section-title { margin-bottom: 2px; }
+.learn-resources .section-sub { margin-bottom: 4px; }
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 8px;
+}
+.resource-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 18px 16px;
+  min-height: 160px;
+}
+.resource-card .rc-tag {
+  align-self: flex-start;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--teal);
+  background: var(--teal-soft);
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, transparent);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.resource-card h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  color: var(--text);
+  line-height: 1.3;
+}
+.resource-card p {
+  margin: 0;
+  flex: 1;
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+  line-height: 1.55;
+}
+.resource-card .rc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--teal);
+  text-decoration: none;
+}
+.resource-card .rc-link:hover {
+  text-decoration: underline;
+}
+.practice-signs-hero {
+  margin-bottom: 18px;
+}
+.practice-signs-hero h2 {
+  margin: 0 0 6px;
+  font-size: var(--fs-xl);
+}
+.practice-signs-hero p {
+  margin: 0;
+  color: var(--text-2);
+  max-width: 620px;
+}
 
 /* ============================================================
    VIEW: AUTH
