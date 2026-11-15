@@ -12,7 +12,7 @@
     [data-theme="light"] body { background: #e4e9f2; color: #0c1424; }
   </style>
   <link rel="stylesheet" href="styles/main.css?v=20261028atm">
-  <link rel="stylesheet" href="styles/views.css?v=20261115acam">
+  <link rel="stylesheet" href="styles/views.css?v=20261115clip">
   <link rel="stylesheet" href="styles/polish.css?v=20261115wait">
   <link rel="stylesheet" href="styles/effects.css?v=20261115wait3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -89,7 +89,7 @@
         <section class="card stage-card arena-live-card">
           <div class="stage-head">
             <h2 class="arena-live-title">Live letter cam
-              <small>Sign the target letter — HandLandmarker reads your handshape into the pad.</small>
+              <small>Record a signing clip, stop, then pick the letter on the pad — we grade the clip with the letter classifier.</small>
             </h2>
             <div class="stage-toggles">
               <button class="chip is-on" id="cameraToggle" title="Turn camera on or off" aria-pressed="true">
@@ -109,9 +109,11 @@
 
           <div class="stage" id="stage">
             <video id="cam" autoplay playsinline muted></video>
+            <video id="clipReplay" class="clip-replay" playsinline muted loop hidden></video>
             <canvas id="overlay" aria-hidden="true"></canvas>
             <div class="track-hud" id="trackHud" hidden aria-hidden="true"></div>
             <div class="stage-live-badge" aria-live="polite"><span class="dot"></span> Live camera</div>
+            <div class="rec-badge" id="recBadge" hidden><span class="rec-dot"></span> REC <span id="recTimer">0.0s</span></div>
             <div class="stage-overlay-state" id="stageOverlay" hidden>
               <div class="stage-wait-fx" aria-hidden="true">
                 <div class="stage-wait-orbits">
@@ -128,6 +130,12 @@
                 <p class="overlay-detail empty-hint">Allow camera access if prompted.</p>
               </div>
             </div>
+          </div>
+          <div class="clip-bar">
+            <button type="button" class="btn btn-primary btn-sm" id="recStartBtn" disabled>● Record</button>
+            <button type="button" class="btn btn-soft btn-sm" id="recStopBtn" disabled>■ Stop</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="recClearBtn" disabled>Clear clip</button>
+            <span class="clip-meta" id="clipMeta">Camera on → Record → Stop → pick a letter to grade.</span>
           </div>
           <div class="stage-status" id="stageStatus"><span class="dot"></span>Camera ready for letter drills…</div>
         </section>
@@ -151,7 +159,7 @@
               </div>
 
               <div class="feedback" id="feedback" role="status">
-                <div><strong>Waiting for your answer…</strong><p>Sign with the Live camera, press a key, or tap the letter pad.</p></div>
+                <div><strong>Waiting for a clip…</strong><p>Record your signing, stop, then tap the letter on the pad (or press a key) to grade the clip.</p></div>
               </div>
 
               <div>
@@ -290,7 +298,7 @@
   <script src="js/engine/handStability.js?v=20261026p8"></script>
   <script src="js/engine/letterClassifier.js?v=20261115prac"></script>
   <script src="js/engine/live.js?v=20261028lstm"></script>
-  <script src="js/views/practice.js?v=20261115cam"></script>
+  <script src="js/views/practice.js?v=20261115clip"></script>
   <script src="js/views/settings.js?v=20261115three"></script>
   <script src="js/app.js?v=20261022l"></script>
 </body>
