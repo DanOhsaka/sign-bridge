@@ -16,7 +16,7 @@ SB.PracticeView = function () {
   });
 
   var state = {
-    tab: "letters",
+    tab: "signs",
     target: null,
     sessionCorrect: 0,
     sessionTried: 0,
@@ -24,10 +24,13 @@ SB.PracticeView = function () {
     nextTimer: null,
   };
 
+  var signFilter = { q: "", cat: "All" };
+
   function save() { SB.store.set("progress", progress); }
 
   function init() {
     bindTabs();
+    bindSignBrowser();
     pickTarget();
     bindPad();
     bindKeyboard();
@@ -57,9 +60,99 @@ SB.PracticeView = function () {
         SB.$$("#practiceTabs button").forEach(function (b) { b.classList.remove("is-on"); });
         btn.classList.add("is-on");
         state.tab = btn.dataset.tab;
-        SB.$("#lettersPane").style.display = state.tab === "letters" ? "" : "none";
-        SB.$("#phrasesPane").style.display = state.tab === "phrases" ? "" : "none";
+        var signs = SB.$("#signsPane");
+        var arena = SB.$("#arenaPane");
+        if (signs) signs.style.display = state.tab === "signs" ? "" : "none";
+        if (arena) arena.style.display = state.tab === "arena" ? "" : "none";
       });
+    });
+  }
+
+  /* ---------- Sign browser (moved from Learn) ---------- */
+  function bindSignBrowser() {
+    if (!SB.$("#signGrid")) return;
+    buildSignCategories();
+    renderSignGrid();
+    var input = SB.$("#learnSearch");
+    if (input) {
+      input.addEventListener("input", function () {
+        signFilter.q = input.value.trim().toLowerCase();
+        renderSignGrid();
+      });
+    }
+  }
+
+  function buildSignCategories() {
+    var wrap = SB.$("#catChips");
+    if (!wrap) return;
+    var cats = ["All"];
+    (SB.PHRASES || []).forEach(function (p) {
+      if (cats.indexOf(p.cat) === -1) cats.push(p.cat);
+    });
+    wrap.innerHTML = "";
+    cats.forEach(function (c) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip" + (c === "All" ? " is-on" : "");
+      chip.dataset.cat = c;
+      chip.textContent = c;
+      chip.addEventListener("click", function () {
+        SB.$$("#catChips .chip").forEach(function (x) { x.classList.remove("is-on"); });
+        chip.classList.add("is-on");
+        signFilter.cat = c;
+        renderSignGrid();
+      });
+      wrap.appendChild(chip);
+    });
+  }
+
+  function renderSignGrid() {
+    var grid = SB.$("#signGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    var items = (SB.PHRASES || []).filter(function (p) {
+      var catOk = signFilter.cat === "All" || p.cat === signFilter.cat;
+      var qOk = !signFilter.q ||
+        p.name.toLowerCase().indexOf(signFilter.q) !== -1 ||
+        p.desc.toLowerCase().indexOf(signFilter.q) !== -1 ||
+        p.cat.toLowerCase().indexOf(signFilter.q) !== -1;
+      return catOk && qOk;
+    });
+
+    if (!items.length) {
+      grid.innerHTML =
+        '<div class="empty" style="grid-column:1/-1">' +
+        '<div class="empty-icon">⌕</div>' +
+        '<div class="empty-title">No signs match</div>' +
+        '<div class="empty-hint">Try another search term, or clear the category filter.</div>' +
+        "</div>";
+      return;
+    }
+
+    items.forEach(function (p) {
+      var card = document.createElement("article");
+      card.className = "sign-card anim-rise";
+      card.innerHTML =
+        '<div class="sc-top"><span class="sc-glyph" aria-hidden="true">' + p.emoji + "</span>" +
+        "<h4>" + p.name + "</h4></div>" +
+        '<p class="sc-desc">' + p.desc + "</p>" +
+        '<div class="sc-foot">' +
+        '<span class="badge badge-cat sc-cat">' + p.cat + "</span>" +
+        '<div class="sc-actions"><button type="button" class="btn btn-soft btn-sm" data-show>Practice →</button></div>' +
+        "</div>";
+      card.querySelector("[data-show]").addEventListener("click", function () {
+        var box = SB.$("#tryTranscript");
+        box.classList.add("is-show");
+        box.innerHTML = "";
+        SB.Engine.signPhrase(p.id, function (tok) {
+          var w = document.createElement("span");
+          w.className = "word " + SB.confClass(tok.conf);
+          w.textContent = (tok.glyph ? tok.glyph + " " : "") + tok.text;
+          box.appendChild(w);
+        });
+      });
+      grid.appendChild(card);
     });
   }
 
@@ -127,7 +220,7 @@ SB.PracticeView = function () {
   }
 
   function sign(letter) {
-    if (state.locked || state.tab !== "letters") return;
+    if (state.locked || state.tab !== "arena") return;
     var target = state.target;
     progress.letters[letter] = progress.letters[letter] || { tried: 0, n: 0, correct: 0 };
     progress.letters[letter].tried++;
@@ -220,7 +313,7 @@ SB.PracticeView = function () {
 
   function bindKeyboard() {
     document.addEventListener("keydown", function (e) {
-      if (state.tab !== "letters") return;
+      if (state.tab !== "arena") return;
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
       var k = e.key.toUpperCase();
       if (/^[A-Z]$/.test(k)) {
