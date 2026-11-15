@@ -807,6 +807,37 @@
   align-items: start;
 }
 
+/* Arena Live camera (reuses Translate stage / waiting loader) */
+.arena-live-card {
+  margin-bottom: 22px;
+}
+.arena-live-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1.15rem, 2vw, 1.45rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.arena-live-title small {
+  display: block;
+  margin-top: 6px;
+  font-family: var(--font);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  color: var(--text-3);
+  letter-spacing: 0;
+}
+.view--practice .arena-live-card .stage {
+  border-radius: var(--r-md);
+}
+.letter-pad button.is-live {
+  border-color: var(--teal);
+  color: var(--teal);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--teal) 45%, transparent),
+    0 0 18px rgba(52, 224, 192, 0.22);
+}
+
 /* Arena */
 .arena { padding: 26px 28px; display: grid; gap: 20px; overflow: visible; min-width: 0; box-sizing: border-box; }
 

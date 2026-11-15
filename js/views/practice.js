@@ -25,12 +25,20 @@ SB.PracticeView = function () {
   };
 
   var signFilter = { q: "", cat: "All" };
+  var cameraOn = false;
+  var liveStarting = false;
+  var livePending = null; /* { letter, conf, firstMs, lastMs } */
+  var liveConfirmTimer = null;
+  var liveListenersBound = false;
+
+  function live() { return SB.Engine.getLiveEngine(); }
 
   function save() { SB.store.set("progress", progress); }
 
   function init() {
     bindTabs();
     bindSignBrowser();
+    bindLiveCamera();
     pickTarget();
     bindPad();
     bindKeyboard();
@@ -39,6 +47,8 @@ SB.PracticeView = function () {
     renderMinipairs();
     resetFeedbackIdle();
     updateStats();
+    /* Start Live when Arena is already selected (e.g. deep link). */
+    if (state.tab === "arena") goLive();
   }
 
   function renderMinipairs() {
@@ -64,8 +74,293 @@ SB.PracticeView = function () {
         var arena = SB.$("#arenaPane");
         if (signs) signs.style.display = state.tab === "signs" ? "" : "none";
         if (arena) arena.style.display = state.tab === "arena" ? "" : "none";
+        if (state.tab === "arena") {
+          goLive();
+        } else {
+          stopCamera({ silent: true });
+        }
       });
     });
+  }
+
+  /* ---------- Live camera (reuse Translate engine + waiting UI) ---------- */
+  function setStageOverlay(kind, title, detail) {
+    var stage = SB.$("#stage");
+    var overlay = SB.$("#stageOverlay");
+    if (!stage) return;
+    stage.classList.remove("is-starting", "is-error", "is-waiting");
+    if (!kind) {
+      if (overlay) overlay.hidden = true;
+      return;
+    }
+    var klass = kind === "error" ? "is-error"
+      : kind === "waiting" ? "is-waiting"
+      : "is-starting";
+    stage.classList.add(klass);
+    if (!overlay) return;
+    overlay.hidden = false;
+    overlay.dataset.kind = kind;
+    var titleEl = SB.$(".overlay-title", overlay);
+    var detailEl = SB.$(".overlay-detail", overlay);
+    var spin = SB.$(".spinner", overlay);
+    var waitFx = SB.$(".stage-wait-fx", overlay);
+    if (titleEl) titleEl.textContent = title || "";
+    if (detailEl) {
+      detailEl.textContent = detail || "";
+      detailEl.hidden = !detail;
+    }
+    if (spin) spin.style.display = kind === "starting" ? "" : "none";
+    if (waitFx) waitFx.style.display = kind === "waiting" ? "" : "none";
+  }
+
+  function syncCameraChip() {
+    var camChip = SB.$("#cameraToggle");
+    if (!camChip) return;
+    camChip.classList.toggle("is-on", !!cameraOn);
+    camChip.setAttribute("aria-pressed", cameraOn ? "true" : "false");
+  }
+
+  function attachLetterClassifier() {
+    var eng = live();
+    if (SB.LetterClassifier && typeof SB.LetterClassifier.classify === "function") {
+      eng.setClassifier(function (feats) {
+        return SB.LetterClassifier.classify(feats);
+      });
+      eng._classifierKind = "letter";
+      return true;
+    }
+    eng.setClassifier(null);
+    eng._classifierKind = null;
+    return false;
+  }
+
+  function clearLivePending() {
+    livePending = null;
+    if (liveConfirmTimer != null) {
+      clearTimeout(liveConfirmTimer);
+      liveConfirmTimer = null;
+    }
+  }
+
+  function holdMsFor(conf) {
+    conf = typeof conf === "number" ? conf : 0;
+    if (conf >= 0.85) return 140;
+    if (conf >= 0.7) return 220;
+    if (conf >= 0.55) return 320;
+    return 420;
+  }
+
+  function normalizeLiveLetter(text) {
+    var t = String(text || "").trim().toUpperCase();
+    if (/^[A-Z]$/.test(t)) return t;
+    return null;
+  }
+
+  function highlightLivePad(letter) {
+    SB.$$("#letterPad button").forEach(function (b) {
+      b.classList.toggle("is-live", !!letter && b.dataset.l === letter);
+    });
+  }
+
+  function considerLiveLetter(tok) {
+    if (state.tab !== "arena" || !cameraOn || state.locked) return;
+    var letter = normalizeLiveLetter(tok && tok.text);
+    if (!letter) return;
+    var conf = typeof tok.conf === "number" ? tok.conf : 0;
+    var now = performance.now();
+    highlightLivePad(letter);
+
+    if (livePending && livePending.letter === letter) {
+      livePending.lastMs = now;
+      livePending.conf = Math.max(livePending.conf, conf);
+    } else {
+      livePending = { letter: letter, conf: conf, firstMs: now, lastMs: now };
+      if (liveConfirmTimer != null) clearTimeout(liveConfirmTimer);
+      var hold = holdMsFor(conf);
+      liveConfirmTimer = setTimeout(function () {
+        liveConfirmTimer = null;
+        if (!livePending || livePending.letter !== letter) return;
+        if (state.locked || state.tab !== "arena" || !cameraOn) return;
+        var waited = Math.max(0, livePending.lastMs - livePending.firstMs);
+        var scored = livePending.letter;
+        clearLivePending();
+        try {
+          var eng = live();
+          if (eng && eng.noteConfirmMs) eng.noteConfirmMs(waited);
+        } catch (e) {}
+        sign(scored, { source: "live", conf: conf });
+      }, hold);
+    }
+  }
+
+  function stopCamera(opts) {
+    opts = opts || {};
+    cameraOn = false;
+    liveStarting = false;
+    clearLivePending();
+    highlightLivePad(null);
+    syncCameraChip();
+    try {
+      var eng = live();
+      if (eng.setClassifier) eng.setClassifier(null);
+      eng._classifierKind = null;
+    } catch (e0) {}
+    try {
+      if (live().getState && live().getState() !== "off") live().stop();
+    } catch (e2) {}
+    try { SB.Engine._hands(0); } catch (e3) {}
+    var stage = SB.$("#stage");
+    if (stage) {
+      stage.classList.remove("is-cam", "is-mirror", "is-starting", "is-error");
+    }
+    setStageOverlay(
+      "waiting",
+      "Waiting for camera to be turned on",
+      "Toggle Camera on to sign letters with Live tracking."
+    );
+    var st = SB.$("#stageStatus");
+    if (st) {
+      st.classList.remove("is-hands");
+      st.innerHTML = '<span class="dot"></span>Camera off — turn Camera on for Live letter drills.';
+    }
+    if (!opts.silent) SB.toast("Camera off", "info");
+  }
+
+  function goLive() {
+    if (state.tab !== "arena") return;
+    if (liveStarting) return;
+    cameraOn = true;
+    liveStarting = true;
+    syncCameraChip();
+    clearLivePending();
+
+    var stage = SB.$("#stage");
+    setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your signing hand in frame.");
+    var st = SB.$("#stageStatus");
+    if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
+    if (SB.resumeThreeFX) SB.resumeThreeFX();
+
+    attachLetterClassifier();
+
+    SB.Engine.setMode("live", {
+      videoEl: SB.$("#cam"),
+      canvasEl: SB.$("#overlay"),
+      mirror: SB.settings.mirror,
+      drawLandmarks: SB.settings.landmarks !== false,
+      showHud: !!(SB.settings && SB.settings.perfHud),
+    }).then(function () {
+      liveStarting = false;
+      if (!cameraOn || state.tab !== "arena") {
+        try { live().stop(); } catch (eStop) {}
+        return;
+      }
+      attachLetterClassifier();
+      setStageOverlay(null);
+      if (stage) {
+        stage.classList.add("is-cam");
+        stage.classList.toggle("is-mirror", !!SB.settings.mirror);
+      }
+      var mir = SB.$("#mirrorToggle");
+      var lm = SB.$("#landmarkToggle");
+      if (mir) mir.classList.toggle("is-on", !!SB.settings.mirror);
+      if (lm) lm.classList.toggle("is-on", SB.settings.landmarks !== false);
+      syncCameraChip();
+      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks !== false);
+      if (live().setMirror) live().setMirror(!!SB.settings.mirror);
+      if (st) {
+        st.innerHTML = live().hasClassifier()
+          ? '<span class="dot"></span>Live letter cam on — sign the target handshape.'
+          : '<span class="dot"></span>Camera on — landmarks only (letter classifier missing).';
+      }
+      SB.toast("Live letter cam on", "ok");
+    }).catch(function (err) {
+      liveStarting = false;
+      cameraOn = false;
+      syncCameraChip();
+      setStageOverlay("error", "Camera unavailable",
+        (err && err.message ? err.message : "Permission denied or no camera found.") +
+        " Toggle Camera on after allowing access.");
+      SB.toast(
+        "Live camera unavailable — " +
+          (err && err.message ? err.message : "permission denied") + ".",
+        "error"
+      );
+    });
+  }
+
+  function bindLiveCamera() {
+    if (!SB.$("#stage") || !SB.$("#cameraToggle")) return;
+
+    var lmChip = SB.$("#landmarkToggle");
+    var mirChip = SB.$("#mirrorToggle");
+    if (lmChip) lmChip.classList.toggle("is-on", SB.settings.landmarks !== false);
+    if (mirChip) mirChip.classList.toggle("is-on", !!SB.settings.mirror);
+    syncCameraChip();
+    setStageOverlay(
+      "waiting",
+      "Waiting for camera to be turned on",
+      "Open Arena and toggle Camera on to start Live letter drills."
+    );
+
+    if (!liveListenersBound) {
+      liveListenersBound = true;
+      SB.Engine.on("result", function (tok) {
+        if (state.tab !== "arena" || !cameraOn) return;
+        considerLiveLetter(tok);
+      });
+      SB.Engine.on("hands", function (count) {
+        if (state.tab !== "arena" || !cameraOn) return;
+        var st = SB.$("#stageStatus");
+        if (!st) return;
+        if (count > 0) {
+          st.classList.add("is-hands");
+          st.innerHTML = '<span class="dot"></span>Hand detected — reading letter handshape…';
+        } else {
+          st.classList.remove("is-hands");
+          st.innerHTML = '<span class="dot"></span>Move a hand into view and sign the target letter.';
+          clearLivePending();
+          highlightLivePad(null);
+        }
+      });
+      window.addEventListener("pagehide", function () {
+        try {
+          if (live().getState && live().getState() !== "off") live().stop();
+        } catch (e) {}
+      });
+    }
+
+    var camBtn = SB.$("#cameraToggle");
+    camBtn.addEventListener("click", function () {
+      if (cameraOn || liveStarting) {
+        stopCamera();
+        return;
+      }
+      goLive();
+    });
+
+    var mirrorBtn = SB.$("#mirrorToggle");
+    if (mirrorBtn) {
+      mirrorBtn.addEventListener("click", function () {
+        SB.settings.mirror = !SB.settings.mirror;
+        SB.saveSettings();
+        mirrorBtn.classList.toggle("is-on", SB.settings.mirror);
+        var stage = SB.$("#stage");
+        if (stage) stage.classList.toggle("is-mirror", !!SB.settings.mirror && stage.classList.contains("is-cam"));
+        if (live().setMirror) live().setMirror(SB.settings.mirror);
+        SB.toast("Mirror mode " + (SB.settings.mirror ? "on" : "off"), "info");
+      });
+    }
+
+    var lmBtn = SB.$("#landmarkToggle");
+    if (lmBtn) {
+      lmBtn.addEventListener("click", function () {
+        SB.settings.landmarks = !SB.settings.landmarks;
+        SB.saveSettings();
+        lmBtn.classList.toggle("is-on", SB.settings.landmarks);
+        if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
+        SB.toast("Landmark overlay " + (SB.settings.landmarks ? "on" : "off"), "info");
+      });
+    }
   }
 
   /* ---------- Sign browser (moved from Learn) ---------- */
@@ -165,6 +460,8 @@ SB.PracticeView = function () {
 
   function pickTarget() {
     clearNextTimer();
+    clearLivePending();
+    highlightLivePad(null);
     state.locked = false;
     if (progress.review.length) {
       state.target = progress.review[0];
@@ -201,7 +498,9 @@ SB.PracticeView = function () {
     var fb = SB.$("#feedback");
     if (!fb) return;
     fb.className = "feedback";
-    fb.innerHTML = "<div><strong>Waiting for your answer…</strong><p>Press the matching letter on your keyboard, or tap the pad below.</p></div>";
+    fb.innerHTML = cameraOn
+      ? "<div><strong>Waiting for your answer…</strong><p>Sign the target with the Live camera — the pad lights up as it reads. You can also tap the pad or press a key.</p></div>"
+      : "<div><strong>Waiting for your answer…</strong><p>Turn Camera on to sign with Live tracking, or tap the pad / press a key.</p></div>";
   }
 
   function showFeedback(kind, html) {
@@ -219,80 +518,107 @@ SB.PracticeView = function () {
     setTimeout(function () { el.classList.remove("is-bump"); }, 240);
   }
 
-  function sign(letter) {
-    if (state.locked || state.tab !== "arena") return;
+  function applyGuess(tok) {
+    var letter = String(tok.text || "").toUpperCase();
     var target = state.target;
+    var padBtn = SB.$('#letterPad button[data-l="' + letter + '"]');
+    var arena = SB.$("#arenaTarget");
+    var src = tok.source === "live" ? "camera" : "pad";
+
+    if (letter === target) {
+      progress.letters[letter] = progress.letters[letter] || { tried: 0, n: 0, correct: 0 };
+      progress.letters[letter].correct++;
+      state.sessionCorrect++;
+      progress.streak++;
+      progress.best = Math.max(progress.best, progress.streak);
+      arena.classList.add("is-correct");
+      if (padBtn) {
+        padBtn.classList.remove("is-miss");
+        padBtn.classList.add("is-correct");
+      }
+      showFeedback("correct",
+        "<span class='fb-ico'>✓</span><div><strong>Correct — " + target + "</strong>" +
+        "<p>" + (tok.conf < 0.85
+          ? "Caught via " + src + " at " + SB.confPct(tok.conf) + " (near-miss zone). Practice this handshape again later."
+          : "Read via " + src + " at " + SB.confPct(tok.conf) + ". Clear handshape.") +
+        "</p></div>");
+      if (progress.review.length && progress.review[0] === target) {
+        progress.review.shift();
+      }
+      save();
+      updateStats();
+      bumpStat("#statStreak");
+      state.nextTimer = setTimeout(pickTarget, SB.settings.reduceMotion ? 200 : 700);
+    } else {
+      progress.streak = 0;
+      var info = SB.LETTER_MAP[target];
+      var confs = (SB.CONFUSIONS[target] || []).slice(0, 3);
+      if (padBtn) padBtn.classList.add("is-miss");
+      arena.classList.add("is-wrong");
+      showFeedback("missed",
+        "<span class='fb-ico'>✕</span><div><strong>Not quite — " + src + " read " + letter + "</strong>" +
+        "<p>Check the handshape. <em>" + info.tip + "</em></p>" +
+        (confs.length ? "<p>Often confused with: <strong>" + confs.join(" · ") + "</strong>.</p>" : "") +
+        "<div class='fb-actions'>" +
+        "<button type='button' class='btn btn-soft btn-sm' data-retry>Try again</button>" +
+        "<button type='button' class='btn btn-ghost btn-sm' data-next>Next letter</button>" +
+        "</div></div>");
+      if (progress.review.indexOf(target) === -1) progress.review.push(target);
+      save();
+      updateStats();
+      setTimeout(function () { arena.classList.remove("is-wrong"); }, 450);
+
+      var retry = SB.$("[data-retry]", SB.$("#feedback"));
+      var next = SB.$("[data-next]", SB.$("#feedback"));
+      if (retry) {
+        retry.addEventListener("click", function () {
+          state.locked = false;
+          clearLivePending();
+          arena.className = "arena-target";
+          resetFeedbackIdle();
+          SB.$$("#letterPad button").forEach(function (b) {
+            b.classList.toggle("is-target", b.dataset.l === target);
+            b.classList.remove("is-live");
+          });
+        });
+      }
+      if (next) {
+        next.addEventListener("click", function () { pickTarget(); });
+      }
+      /* unlock after miss so try-again / live cam can continue */
+      state.locked = false;
+    }
+  }
+
+  /**
+   * Score a letter guess from pad, keyboard, or Live camera.
+   * @param {string} letter
+   * @param {{source?:string, conf?:number}=} liveTok
+   */
+  function sign(letter, liveTok) {
+    if (state.locked || state.tab !== "arena") return;
+    letter = String(letter || "").toUpperCase();
+    if (!/^[A-Z]$/.test(letter)) return;
+
     progress.letters[letter] = progress.letters[letter] || { tried: 0, n: 0, correct: 0 };
     progress.letters[letter].tried++;
     progress.letters[letter].n++;
     state.sessionTried++;
     state.locked = true;
+    clearLivePending();
 
+    if (liveTok && liveTok.source === "live") {
+      applyGuess({
+        text: letter,
+        conf: typeof liveTok.conf === "number" ? liveTok.conf : 0.8,
+        source: "live",
+      });
+      return;
+    }
+
+    /* Pad / keyboard: keep SimEngine near-miss behavior for drills without cam. */
     SB.Engine.signLetter(letter, function (tok) {
-      var got = tok.text;
-      var padBtn = SB.$('#letterPad button[data-l="' + letter + '"]');
-      var arena = SB.$("#arenaTarget");
-
-      if (got === target) {
-        progress.letters[letter].correct++;
-        state.sessionCorrect++;
-        progress.streak++;
-        progress.best = Math.max(progress.best, progress.streak);
-        arena.classList.add("is-correct");
-        if (padBtn) {
-          padBtn.classList.remove("is-miss");
-          padBtn.classList.add("is-correct");
-        }
-        showFeedback("correct",
-          "<span class='fb-ico'>✓</span><div><strong>Correct — " + target + "</strong>" +
-          "<p>" + (tok.conf < 0.85
-            ? "Caught at " + SB.confPct(tok.conf) + " (near-miss zone). Practice this handshape again later."
-            : "Read at " + SB.confPct(tok.conf) + ". Clear handshape.") +
-          "</p></div>");
-        if (progress.review.length && progress.review[0] === target) {
-          progress.review.shift();
-        }
-        save();
-        updateStats();
-        bumpStat("#statStreak");
-        state.nextTimer = setTimeout(pickTarget, SB.settings.reduceMotion ? 200 : 700);
-      } else {
-        progress.streak = 0;
-        var info = SB.LETTER_MAP[target];
-        var confs = (SB.CONFUSIONS[target] || []).slice(0, 3);
-        if (padBtn) padBtn.classList.add("is-miss");
-        arena.classList.add("is-wrong");
-        showFeedback("missed",
-          "<span class='fb-ico'>✕</span><div><strong>Not quite — read as " + got + "</strong>" +
-          "<p>Check the handshape. <em>" + info.tip + "</em></p>" +
-          (confs.length ? "<p>Often confused with: <strong>" + confs.join(" · ") + "</strong>.</p>" : "") +
-          "<div class='fb-actions'>" +
-          "<button type='button' class='btn btn-soft btn-sm' data-retry>Try again</button>" +
-          "<button type='button' class='btn btn-ghost btn-sm' data-next>Next letter</button>" +
-          "</div></div>");
-        if (progress.review.indexOf(target) === -1) progress.review.push(target);
-        save();
-        updateStats();
-        setTimeout(function () { arena.classList.remove("is-wrong"); }, 450);
-
-        var retry = SB.$("[data-retry]", SB.$("#feedback"));
-        var next = SB.$("[data-next]", SB.$("#feedback"));
-        if (retry) {
-          retry.addEventListener("click", function () {
-            state.locked = false;
-            arena.className = "arena-target";
-            resetFeedbackIdle();
-            SB.$$("#letterPad button").forEach(function (b) {
-              b.classList.toggle("is-target", b.dataset.l === target);
-            });
-          });
-        }
-        if (next) {
-          next.addEventListener("click", function () { pickTarget(); });
-        }
-        /* unlock after miss so try-again works; don't auto-advance */
-        state.locked = false;
-      }
+      applyGuess(Object.assign({ source: "demo" }, tok));
     });
   }
 

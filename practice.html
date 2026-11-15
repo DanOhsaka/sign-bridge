@@ -12,8 +12,8 @@
     [data-theme="light"] body { background: #e4e9f2; color: #0c1424; }
   </style>
   <link rel="stylesheet" href="styles/main.css?v=20261028atm">
-  <link rel="stylesheet" href="styles/views.css?v=20261115prac">
-  <link rel="stylesheet" href="styles/polish.css?v=20261115qp">
+  <link rel="stylesheet" href="styles/views.css?v=20261115acam">
+  <link rel="stylesheet" href="styles/polish.css?v=20261115wait">
   <link rel="stylesheet" href="styles/effects.css?v=20261115wait3">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -86,6 +86,52 @@
 
       <!-- ══════════ Arena pane (prior rounds / drills) ══════════ -->
       <div id="arenaPane" style="display:none">
+        <section class="card stage-card arena-live-card">
+          <div class="stage-head">
+            <h2 class="arena-live-title">Live letter cam
+              <small>Sign the target letter — HandLandmarker reads your handshape into the pad.</small>
+            </h2>
+            <div class="stage-toggles">
+              <button class="chip is-on" id="cameraToggle" title="Turn camera on or off" aria-pressed="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                Camera
+              </button>
+              <button class="chip" id="mirrorToggle" title="Mirror the camera feed">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M12 3v18"/><path d="M5 7l7-4 7 4"/><path d="M5 11l7 4 7-4"/><path d="M5 17l7 4 7-4"/></svg>
+                Mirror
+              </button>
+              <button class="chip" id="landmarkToggle" title="Show hand skeleton">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><polyline points="1 9 1 1 9 1"/><polyline points="23 9 23 1 15 1"/><polyline points="1 15 1 23 9 23"/><polyline points="23 15 23 23 15 23"/></svg>
+                Landmarks
+              </button>
+            </div>
+          </div>
+
+          <div class="stage" id="stage">
+            <video id="cam" autoplay playsinline muted></video>
+            <canvas id="overlay" aria-hidden="true"></canvas>
+            <div class="track-hud" id="trackHud" hidden aria-hidden="true"></div>
+            <div class="stage-live-badge" aria-live="polite"><span class="dot"></span> Live camera</div>
+            <div class="stage-overlay-state" id="stageOverlay" hidden>
+              <div class="stage-wait-fx" aria-hidden="true">
+                <div class="stage-wait-orbits">
+                  <span class="stage-wait-ring"></span>
+                  <span class="stage-wait-ring"></span>
+                  <span class="stage-wait-ring"></span>
+                  <span class="stage-wait-core"></span>
+                </div>
+                <div class="stage-wait-beams"></div>
+              </div>
+              <div class="stage-overlay-copy">
+                <div class="spinner" aria-hidden="true"></div>
+                <div class="overlay-title empty-title ac-text-shimmer">Starting camera…</div>
+                <p class="overlay-detail empty-hint">Allow camera access if prompted.</p>
+              </div>
+            </div>
+          </div>
+          <div class="stage-status" id="stageStatus"><span class="dot"></span>Camera ready for letter drills…</div>
+        </section>
+
         <div id="lettersPane">
           <div class="practice-grid">
 
@@ -105,7 +151,7 @@
               </div>
 
               <div class="feedback" id="feedback" role="status">
-                <div><strong>Waiting for your answer…</strong><p>Press the matching letter on your keyboard, or tap the pad below.</p></div>
+                <div><strong>Waiting for your answer…</strong><p>Sign with the Live camera, press a key, or tap the letter pad.</p></div>
               </div>
 
               <div>
@@ -232,17 +278,19 @@
   <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
 
   <script src="js/ui/common.js?v=20261115three"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
-<script src="js/ui/three-scene.js?v=20261115three"></script>
-<script src="js/ui/effects.js?v=20261115three"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
+  <script src="js/ui/three-scene.js?v=20261115three"></script>
+  <script src="js/ui/effects.js?v=20261115three"></script>
   <script src="js/views/auth.js?v=20261022l"></script>
   <script src="js/data/signs.js?v=20261115learn"></script>
   <script src="js/ui/transcript.js?v=20261022l"></script>
-  <script src="js/engine/recognizer.js?v=20261022l"></script>
+  <script src="js/engine/recognizer.js?v=20261115wait"></script>
   <script src="js/engine/simulated.js?v=20261022l"></script>
-  <script src="js/engine/oneEuro.js?v=20261022l"></script>
-  <script src="js/engine/live.js?v=20261022l"></script>
-  <script src="js/views/practice.js?v=20261115prac"></script>
+  <script src="js/engine/oneEuro.js?v=20261026p8"></script>
+  <script src="js/engine/handStability.js?v=20261026p8"></script>
+  <script src="js/engine/letterClassifier.js?v=20261115prac"></script>
+  <script src="js/engine/live.js?v=20261028lstm"></script>
+  <script src="js/views/practice.js?v=20261115cam"></script>
   <script src="js/views/settings.js?v=20261115three"></script>
   <script src="js/app.js?v=20261022l"></script>
 </body>
