@@ -24,8 +24,9 @@ SB.DEFAULTS = {
   speakLang: "en",        // BCP-47 primary tag for TTS output language
   rate: 1,
   reduceMotion: false,
+  threeFx: true,          // Interactive Three.js page atmosphere (default on)
   perfHud: false,         // Opt-in FPS/latency HUD only (?perf=1 / Settings)
-  mode: "demo",
+  mode: "live",
 };
 
 /* Languages offered in Settings → Speak language (transcript is English/ASL gloss) */

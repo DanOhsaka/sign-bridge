@@ -1,103 +1,24 @@
 /* ============================================================
    SignBridge — Learn view (learn.js)
-   Cleaner card hierarchy: title → description → meta + action
+   ASL communication quick guide + informative resources.
+   Sign practice grid lives on Practice.
    ============================================================ */
 
 window.SB = window.SB || {};
 
 SB.LearnView = function () {
-  var filter = { q: "", cat: "All" };
 
   function init() {
-    buildCategories();
-    renderGrid();
-    bindSearch();
     renderEtiquette();
     renderFacts();
-  }
-
-  function buildCategories() {
-    var cats = ["All"];
-    SB.PHRASES.forEach(function (p) { if (cats.indexOf(p.cat) === -1) cats.push(p.cat); });
-
-    var wrap = SB.$("#catChips");
-    wrap.innerHTML = "";
-    cats.forEach(function (c) {
-      var chip = document.createElement("button");
-      chip.type = "button";
-      chip.className = "chip" + (c === "All" ? " is-on" : "");
-      chip.dataset.cat = c;
-      chip.textContent = c;
-      chip.addEventListener("click", function () {
-        SB.$$("#catChips .chip").forEach(function (x) { x.classList.remove("is-on"); });
-        chip.classList.add("is-on");
-        filter.cat = c;
-        renderGrid();
-      });
-      wrap.appendChild(chip);
-    });
-  }
-
-  function bindSearch() {
-    var input = SB.$("#learnSearch");
-    input.addEventListener("input", function () {
-      filter.q = input.value.trim().toLowerCase();
-      renderGrid();
-    });
-  }
-
-  function renderGrid() {
-    var grid = SB.$("#signGrid");
-    grid.innerHTML = "";
-
-    var items = SB.PHRASES.filter(function (p) {
-      var catOk = filter.cat === "All" || p.cat === filter.cat;
-      var qOk = !filter.q || p.name.toLowerCase().indexOf(filter.q) !== -1 ||
-                p.desc.toLowerCase().indexOf(filter.q) !== -1 ||
-                p.cat.toLowerCase().indexOf(filter.q) !== -1;
-      return catOk && qOk;
-    });
-
-    if (!items.length) {
-      grid.innerHTML =
-        '<div class="empty" style="grid-column:1/-1">' +
-        '<div class="empty-icon">⌕</div>' +
-        '<div class="empty-title">No signs match</div>' +
-        '<div class="empty-hint">Try another search term, or clear the category filter.</div>' +
-        "</div>";
-      return;
-    }
-
-    items.forEach(function (p) {
-      var card = document.createElement("article");
-      card.className = "sign-card anim-rise";
-      card.innerHTML =
-        '<div class="sc-top"><span class="sc-glyph" aria-hidden="true">' + p.emoji + "</span>" +
-        "<h4>" + p.name + "</h4></div>" +
-        '<p class="sc-desc">' + p.desc + "</p>" +
-        '<div class="sc-foot">' +
-        '<span class="badge badge-cat sc-cat">' + p.cat + "</span>" +
-        '<div class="sc-actions"><button type="button" class="btn btn-soft btn-sm" data-show>Practice →</button></div>' +
-        "</div>";
-      card.querySelector("[data-show]").addEventListener("click", function () {
-        var box = SB.$("#tryTranscript");
-        box.classList.add("is-show");
-        box.innerHTML = "";
-        SB.Engine.signPhrase(p.id, function (tok) {
-          var w = document.createElement("span");
-          w.className = "word " + SB.confClass(tok.conf);
-          w.textContent = (tok.glyph ? tok.glyph + " " : "") + tok.text;
-          box.appendChild(w);
-        });
-      });
-      grid.appendChild(card);
-    });
+    renderResources();
   }
 
   function renderEtiquette() {
     var list = SB.$("#etiquetteList");
+    if (!list) return;
     list.innerHTML = "";
-    SB.ETIQUETTE.forEach(function (tip) {
+    (SB.ETIQUETTE || []).forEach(function (tip) {
       var li = document.createElement("li");
       li.innerHTML = "<div><strong>" + tip.title + ".</strong> " + tip.text + "</div>";
       list.appendChild(li);
@@ -106,11 +27,31 @@ SB.LearnView = function () {
 
   function renderFacts() {
     var wrap = SB.$("#factCards");
+    if (!wrap) return;
     wrap.innerHTML = "";
-    SB.ASL_FACTS.forEach(function (f) {
+    (SB.ASL_FACTS || []).forEach(function (f) {
       var card = document.createElement("div");
       card.className = "card fact-card";
       card.innerHTML = '<span class="fc-ico">' + f.ico + "</span><p>" + f.text + "</p>";
+      wrap.appendChild(card);
+    });
+  }
+
+  function renderResources() {
+    var wrap = SB.$("#resourceCards");
+    if (!wrap) return;
+    wrap.innerHTML = "";
+    (SB.LEARN_RESOURCES || []).forEach(function (r) {
+      var card = document.createElement("article");
+      card.className = "resource-card card";
+      card.innerHTML =
+        '<div class="rc-tag">' + SB.escHtml(r.tag) + "</div>" +
+        "<h3>" + SB.escHtml(r.title) + "</h3>" +
+        "<p>" + SB.escHtml(r.blurb) + "</p>" +
+        '<a class="rc-link" href="' + SB.escHtml(r.url) +
+        '" target="_blank" rel="noopener noreferrer">' +
+        SB.escHtml(r.label || "Open resource") +
+        ' <span aria-hidden="true">↗</span></a>';
       wrap.appendChild(card);
     });
   }

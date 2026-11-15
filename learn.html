@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");var d=sessionStorage.getItem("sb.navDir");if(d==="1"||d==="-1"||d==="0")document.documentElement.setAttribute("data-nav-dir",d);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
-  <title>SignBridge — Learn</title>
-  <meta name="description" content="SignBridge reference — sign dictionary, ASL facts, and how to communicate with Deaf people.">
+  <title>SignBridge — Information</title>
+  <meta name="description" content="ASL information guide and resources on Deaf culture, disability, and American Sign Language.">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>✋</text></svg>">
   <style>
     html, body { margin: 0; min-height: 100vh; background: #060a14; color: #e9eef9; }
     [data-theme="light"] body { background: #e4e9f2; color: #0c1424; }
   </style>
   <link rel="stylesheet" href="styles/main.css?v=20261028atm">
-  <link rel="stylesheet" href="styles/views.css?v=20261022l">
-  <link rel="stylesheet" href="styles/polish.css?v=20261027nav">
+  <link rel="stylesheet" href="styles/views.css?v=20261115learn">
+  <link rel="stylesheet" href="styles/polish.css?v=20261115qp">
   <link rel="stylesheet" href="styles/effects.css?v=20261028atm">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,8 +35,8 @@
       <nav class="nav" aria-label="Main">
         <div class="nav-pill" id="navPill"></div>
         <a data-nav="translate" href="index.html" title="Live sign → text">Translate</a>
-        <a data-nav="practice" href="practice.html" title="Test your signing skills">Practice</a>
-        <a data-nav="learn" href="learn.html" title="Explore ASL vocabulary">Learn</a>
+        <a data-nav="practice" href="practice.html" title="Practice letters, phrases, and signs">Practice</a>
+        <a data-nav="learn" href="learn.html" title="ASL information and resources">Information</a>
       </nav>
       <div class="topbar-actions">
         <div class="theme-switch" id="themeSwitch" title="Toggle theme" role="switch" aria-label="Toggle theme" style="cursor:pointer">
@@ -61,18 +61,9 @@
 
     <main class="view view--learn">
       <div class="learn-hero">
-        <h1>Learn to communicate</h1>
-        <p>Browse common ASL signs. Open a card and press <strong>Practice</strong> to watch it stream through the recognizer.</p>
+        <h1>ASL communication guide</h1>
+        <p>A quick orientation to respectful communication, how ASL works, and trusted resources on Deaf culture, disability, and American Sign Language. To drill signs, letters, and phrases, use <a href="practice.html">Practice</a>.</p>
       </div>
-
-      <div class="learn-toolbar">
-        <input class="input" id="learnSearch" placeholder="Search signs — try 'help', 'water', 'family'…" aria-label="Search signs">
-        <div class="cat-chips" id="catChips"></div>
-      </div>
-
-      <div class="try-transcript" id="tryTranscript" aria-live="polite"></div>
-
-      <div class="learn-grid" id="signGrid"></div>
 
       <div class="learn-sections">
         <div class="card etiquette">
@@ -85,6 +76,12 @@
           <div class="section-title" id="aslFactsTitle">How ASL actually works</div>
           <p class="section-sub">Four facts that change how you learn — and how you design for it.</p>
           <div class="fact-list" id="factCards"></div>
+        </section>
+
+        <section class="learn-resources" aria-labelledby="resourcesTitle">
+          <div class="section-title" id="resourcesTitle">Informative resources</div>
+          <p class="section-sub">Curated links on ASL, Deaf culture, and disability. Each opens in a new tab.</p>
+          <div class="resource-grid" id="resourceCards"></div>
         </section>
       </div>
     </main>
@@ -132,6 +129,10 @@
         <button class="toggle" id="setLandmarks" role="switch" aria-label="Landmark overlay"></button>
       </div>
       <div class="toggle-row">
+        <span class="lbl">Interactive background<small>Three.js particle atmosphere. Off frees GPU.</small></span>
+        <button class="toggle" id="setThreeFx" role="switch" aria-label="Interactive background"></button>
+      </div>
+      <div class="toggle-row">
         <span class="lbl">Reduce motion<small>Turn off animations.</small></span>
         <button class="toggle" id="setReduceMotion" role="switch" aria-label="Reduce motion"></button>
       </div>
@@ -142,19 +143,14 @@
 
   <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
 
-  <script src="js/ui/common.js?v=20261028tts2"></script>
+  <script src="js/ui/common.js?v=20261115three"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
-<script src="js/ui/three-scene.js?v=20261027th"></script>
-<script src="js/ui/effects.js?v=20261022l"></script>
+<script src="js/ui/three-scene.js?v=20261115three"></script>
+<script src="js/ui/effects.js?v=20261115three"></script>
   <script src="js/views/auth.js?v=20261022l"></script>
-  <script src="js/data/signs.js?v=20261022l"></script>
-  <script src="js/ui/transcript.js?v=20261022l"></script>
-  <script src="js/engine/recognizer.js?v=20261022l"></script>
-  <script src="js/engine/simulated.js?v=20261022l"></script>
-  <script src="js/engine/oneEuro.js?v=20261022l"></script>
-  <script src="js/engine/live.js?v=20261022l"></script>
-  <script src="js/views/learn.js?v=20261022l"></script>
-  <script src="js/views/settings.js?v=20261022l"></script>
+  <script src="js/data/signs.js?v=20261115learn"></script>
+  <script src="js/views/learn.js?v=20261115learn"></script>
+  <script src="js/views/settings.js?v=20261115three"></script>
   <script src="js/app.js?v=20261022l"></script>
 </body>
 </html>

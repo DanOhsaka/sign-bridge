@@ -9,6 +9,7 @@
      • pointer-events: none on every canvas
      • DPR capped; particle count scales with viewport
      • pause on prefers-reduced-motion, reduceMotion, hidden tab
+     • Settings → threeFx (default on): dispose when off
      • one shared rAF loop for all scenes
    ============================================================ */
 
@@ -38,12 +39,46 @@ window.SB = window.SB || {};
     cur: null,
   };
 
+  function threeFxEnabled() {
+    /* Default on when setting is missing (older localStorage). */
+    return !(SB.settings && SB.settings.threeFx === false);
+  }
+
   function shouldReduce() {
     if (SB.settings && SB.settings.reduceMotion) return true;
     if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
       return true;
     }
     return false;
+  }
+
+  function disposeEntry(entry) {
+    try {
+      if (entry._ro && entry._ro.disconnect) entry._ro.disconnect();
+    } catch (e0) {}
+    try {
+      if (entry.scene) {
+        entry.scene.traverse(function (obj) {
+          if (obj.geometry && obj.geometry.dispose) obj.geometry.dispose();
+          if (obj.material) {
+            if (Array.isArray(obj.material)) {
+              obj.material.forEach(function (m) { if (m && m.dispose) m.dispose(); });
+            } else if (obj.material.dispose) {
+              obj.material.dispose();
+            }
+          }
+        });
+      }
+    } catch (e1) {}
+    try {
+      if (entry.renderer) {
+        entry.renderer.dispose();
+        if (entry.renderer.forceContextLoss) entry.renderer.forceContextLoss();
+      }
+    } catch (e2) {}
+    try {
+      if (entry.el && entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
+    } catch (e3) {}
   }
 
   function capDpr() {
@@ -650,8 +685,9 @@ window.SB = window.SB || {};
   SB.mountThreeFX = function () {
     if (SB._threeMounted) return;
     if (!window.THREE) return;
-    if (shouldReduce()) {
+    if (!threeFxEnabled() || shouldReduce()) {
       document.documentElement.classList.add("sb-three-paused");
+      document.documentElement.classList.remove("sb-has-three");
       return;
     }
 
@@ -673,9 +709,12 @@ window.SB = window.SB || {};
         obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
       }
 
-      document.addEventListener("visibilitychange", function () {
-        if (!document.hidden && !shouldReduce()) paused = false;
-      });
+      if (!SB._threeVisBound) {
+        SB._threeVisBound = true;
+        document.addEventListener("visibilitychange", function () {
+          if (!document.hidden && threeFxEnabled() && !shouldReduce()) paused = false;
+        });
+      }
 
     } catch (err) {
       console.warn("SB.mountThreeFX failed:", err);
@@ -688,14 +727,54 @@ window.SB = window.SB || {};
   };
 
   SB.resumeThreeFX = function () {
-    if (shouldReduce()) return;
+    if (!threeFxEnabled() || shouldReduce()) return;
+    if (!SB._threeMounted) {
+      SB.mountThreeFX();
+      return;
+    }
     paused = false;
     document.documentElement.classList.remove("sb-three-paused");
     if (scenes.length) startLoop();
   };
 
-  /* Re-apply when settings toggle reduce motion */
+  /** Tear down WebGL canvases + stop rAF when Settings disables Three FX. */
+  SB.disposeThreeFX = function () {
+    stopLoop();
+    paused = true;
+    for (var i = 0; i < scenes.length; i++) {
+      disposeEntry(scenes[i]);
+    }
+    scenes.length = 0;
+    SB._threeMounted = false;
+    document.documentElement.classList.remove("sb-has-three");
+    document.documentElement.classList.add("sb-three-paused");
+    var leftover = document.querySelectorAll(".sb-three-bg, .sb-three-orb, .sb-three-hand");
+    for (var j = 0; j < leftover.length; j++) {
+      try {
+        if (leftover[j].parentNode) leftover[j].parentNode.removeChild(leftover[j]);
+      } catch (e) {}
+    }
+  };
+
+  /* Re-apply when settings toggle reduce motion / threeFx */
   SB.refreshThreeMotion = function () {
+    if (!threeFxEnabled()) {
+      SB.disposeThreeFX();
+      return;
+    }
+    if (!SB._threeMounted) {
+      SB.mountThreeFX();
+      return;
+    }
     applyMotionPolicy();
+  };
+
+  SB.applyThreeFxSetting = function () {
+    if (threeFxEnabled() && !shouldReduce()) {
+      if (!SB._threeMounted) SB.mountThreeFX();
+      else SB.resumeThreeFX();
+    } else {
+      SB.disposeThreeFX();
+    }
   };
 })();
