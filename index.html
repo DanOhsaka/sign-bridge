@@ -12,8 +12,8 @@
     [data-theme="light"] body { background: #e4e9f2; color: #0c1424; }
   </style>
   <link rel="stylesheet" href="styles/main.css?v=20261028atm">
-  <link rel="stylesheet" href="styles/views.css?v=20261026qp">
-  <link rel="stylesheet" href="styles/polish.css?v=20261027nav">
+  <link rel="stylesheet" href="styles/views.css?v=20261115learn">
+  <link rel="stylesheet" href="styles/polish.css?v=20261115qp">
   <link rel="stylesheet" href="styles/effects.css?v=20261028atm">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -35,12 +35,12 @@
     <nav class="nav" aria-label="Main">
       <div class="nav-pill" id="navPill"></div>
       <a data-nav="translate" href="index.html" title="Live sign → text">Translate</a>
-      <a data-nav="practice" href="practice.html" title="Test your signing skills">Practice</a>
-      <a data-nav="learn" href="learn.html" title="Explore ASL vocabulary">Learn</a>
+        <a data-nav="practice" href="practice.html" title="Practice letters, phrases, and signs">Practice</a>
+        <a data-nav="learn" href="learn.html" title="ASL information and resources">Information</a>
     </nav>
 
     <div class="topbar-actions">
-      <span class="engine-pill is-demo" id="enginePill"><span class="dot"></span><span class="pill-text">Demo · simulated</span></span>
+      <span class="engine-pill is-live" id="enginePill"><span class="dot"></span><span class="pill-text">Live · starting…</span></span>
 
       <div class="theme-switch" id="themeSwitch" title="Toggle theme" role="switch" aria-label="Toggle theme" style="cursor:pointer">
         <div class="ts-track">
@@ -71,20 +71,13 @@
     <section class="card stage-card">
       <div class="stage-head">
         <h1>Live translate
-          <small>Sign → text, in real time. Watch the machine read your hands.</small>
+          <small>Sign → text in real time with the camera and Keras LSTM.</small>
         </h1>
-        <div class="segmented" id="modeSeg" role="tablist" aria-label="Engine mode">
-          <div class="seg-track" id="modeSegTrack"></div>
-          <button class="is-on slug-demo" data-mode="demo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M9 3h6v11l4.5 6H4.5L9 14V3z"/><line x1="6" y1="9" x2="18" y2="9"/></svg>
-            Demo
-          </button>
-          <button class="slug-live" data-mode="live">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-            Live
-          </button>
-        </div>
         <div class="stage-toggles">
+          <button class="chip is-on" id="cameraToggle" title="Turn camera on or off" aria-pressed="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            Camera
+          </button>
           <button class="chip" id="mirrorToggle" title="Mirror the camera feed">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="13" height="13"><path d="M12 3v18"/><path d="M5 7l7-4 7 4"/><path d="M5 11l7 4 7-4"/><path d="M5 17l7 4 7-4"/></svg>
             Mirror
@@ -108,41 +101,9 @@
             <p class="overlay-detail empty-hint" style="margin:8px auto 0">Allow camera access if prompted.</p>
           </div>
         </div>
-        <div class="stage-demo" id="stageDemo">
-          <div class="demo-hand" aria-hidden="true"><svg class="demo-hand-icon" xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg></div>
-          <h2>Demo mode</h2>
-          <p>Recognition is simulated so you can explore the whole UI before the model is trained. Press <span class="kbd">1</span>–<span class="kbd">9</span> to sign, or watch a full session.</p>
-          <div class="demo-actions">
-            <button class="btn-grad" id="watchDemo">
-              <svg viewBox="0 0 24 24" fill="currentColor" stroke="none" width="14" height="14"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              Watch a live demo
-            </button>
-            <button class="btn-blur" data-go-live="true">
-              Or try real hand tracking
-            </button>
-          </div>
-        </div>
       </div>
 
-      <div class="demo-hint-bar" id="demoHintBar">
-        <div class="demo-hint">Tip: switch to <strong>Live</strong> for real MediaPipe hand landmarks — the same skeleton your trained model will read.</div>
-      </div>
-
-      <!-- Quick phrases stay high in the card so chips aren't below the fold -->
-      <div class="quick-phrases">
-        <div class="q-label">Quick phrases — press a number or click to sign</div>
-        <div class="q-chips" id="quickChips"></div>
-      </div>
-
-      <div class="spell-strip">
-        <input class="input" id="spellInput" placeholder="Spell any word with your hands — try DOG, or your name…" maxlength="24" aria-label="Spell a word">
-        <button class="btn-grad btn-sm" id="spellGo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
-          Spell it
-        </button>
-      </div>
-
-      <div class="stage-status" id="stageStatus"><span class="dot"></span>Demo engine — recognition is simulated so the full UI works before the model is trained.</div>
+      <div class="stage-status" id="stageStatus"><span class="dot"></span>Starting Live camera…</div>
 
       <div class="card spotlight" id="spotlight">
         <div class="spotlight-label">
@@ -179,7 +140,7 @@
       <div class="transcript" id="transcript" aria-live="polite">
         <div class="empty tx-empty">
           <div class="empty-title">Waiting for signs</div>
-          <div class="empty-hint">Words stream here as one growing sentence. Press <span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live.</div>
+          <div class="empty-hint">Words stream here as one growing sentence when Live recognition is confident.</div>
         </div>
       </div>
 
@@ -252,6 +213,10 @@
       <button class="toggle" id="setLandmarks" role="switch" aria-label="Landmark overlay"></button>
     </div>
     <div class="toggle-row">
+      <span class="lbl">Interactive background<small>Three.js particle atmosphere. Off frees GPU.</small></span>
+      <button class="toggle" id="setThreeFx" role="switch" aria-label="Interactive background"></button>
+    </div>
+    <div class="toggle-row">
       <span class="lbl">Reduce motion<small>Turn off animations.</small></span>
       <button class="toggle" id="setReduceMotion" role="switch" aria-label="Reduce motion"></button>
     </div>
@@ -266,15 +231,14 @@
 
 <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
 
-<script src="js/ui/common.js?v=20261028tts2"></script>
+<script src="js/ui/common.js?v=20261115live"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.min.js"></script>
-<script src="js/ui/three-scene.js?v=20261027th"></script>
-<script src="js/ui/effects.js?v=20261022l"></script>
+<script src="js/ui/three-scene.js?v=20261115three"></script>
+<script src="js/ui/effects.js?v=20261115three"></script>
 <script src="js/views/auth.js?v=20261022l"></script>
-<script src="js/data/signs.js?v=20261022l"></script>
-<script src="js/ui/transcript.js?v=20261028local"></script>
-<script src="js/engine/recognizer.js?v=20261022l"></script>
-<script src="js/engine/simulated.js?v=20261022l"></script>
+<script src="js/data/signs.js?v=20261115qp"></script>
+<script src="js/ui/transcript.js?v=20261115live"></script>
+<script src="js/engine/recognizer.js?v=20261115cam"></script>
 <script src="js/engine/oneEuro.js?v=20261026p8"></script>
 <script src="js/engine/handStability.js?v=20261026p8"></script>
 <script src="js/training/storage.js?v=20261022l"></script>
@@ -282,8 +246,8 @@
 <script src="./js/engine/lstm-live-test.js?v=20261028lstm"></script>
 <script src="js/engine/handshapeClassifier.js?v=20261028local"></script>
 <script src="js/engine/live.js?v=20261028lstm"></script>
-<script src="js/views/translate.js?v=20261028atm"></script>
-<script src="js/views/settings.js?v=20261023p"></script>
+<script src="js/views/translate.js?v=20261115cam"></script>
+<script src="js/views/settings.js?v=20261115three"></script>
 <script src="js/app.js?v=20261022l"></script>
 <script>
 /* nav pill init */
@@ -299,29 +263,6 @@
   }
   setTimeout(movePill, 80);
   window.addEventListener('resize', movePill);
-
-  /* segmented track — use SB._moveSegTrack (exact button bounds) */
-  function moveSegTrack() {
-    if (window.SB && typeof SB._moveSegTrack === 'function') {
-      SB._moveSegTrack();
-      return;
-    }
-    var seg = document.getElementById('modeSeg');
-    var track = document.getElementById('modeSegTrack');
-    if (!seg || !track) return;
-    var active = seg.querySelector('button.is-on');
-    if (!active) return;
-    var sr = seg.getBoundingClientRect();
-    var br = active.getBoundingClientRect();
-    track.style.left = (br.left - sr.left) + 'px';
-    track.style.top = (br.top - sr.top) + 'px';
-    track.style.width = br.width + 'px';
-    track.style.height = br.height + 'px';
-  }
-  setTimeout(moveSegTrack, 100);
-  document.getElementById('modeSeg') && document.getElementById('modeSeg').addEventListener('click', function() {
-    setTimeout(moveSegTrack, 10);
-  });
 })();
 </script>
 </body>
