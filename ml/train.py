@@ -146,7 +146,7 @@ print(
 
 # ---------------------------------------------------------
 # Build classifier
-# One GRU is enough for 30-frame, 3-class recordings.
+# One GRU is enough for 60-frame sign recordings.
 # The saved filename stays signbridge_lstm.keras so the
 # existing loader keeps working after retraining.
 # ---------------------------------------------------------

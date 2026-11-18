@@ -9,7 +9,6 @@
      • pointer-events: none on every canvas
      • DPR capped; particle count scales with viewport
      • pause on prefers-reduced-motion, reduceMotion, hidden tab
-     • Settings → threeFx (default on): dispose when off
      • one shared rAF loop for all scenes
    ============================================================ */
 
@@ -29,20 +28,6 @@ window.SB = window.SB || {};
   var clock = null;
   var reduce = false;
   var pointer = { x: 0, y: 0, tx: 0, ty: 0, bound: false };
-  /* Smooth dark↔light color blend for atmosphere (avoids hard snap/jank) */
-  var themeBlend = {
-    active: false,
-    t0: 0,
-    durMs: 360,
-    from: null,
-    to: null,
-    cur: null,
-  };
-
-  function threeFxEnabled() {
-    /* Default on when setting is missing (older localStorage). */
-    return !(SB.settings && SB.settings.threeFx === false);
-  }
 
   function shouldReduce() {
     if (SB.settings && SB.settings.reduceMotion) return true;
@@ -50,35 +35,6 @@ window.SB = window.SB || {};
       return true;
     }
     return false;
-  }
-
-  function disposeEntry(entry) {
-    try {
-      if (entry._ro && entry._ro.disconnect) entry._ro.disconnect();
-    } catch (e0) {}
-    try {
-      if (entry.scene) {
-        entry.scene.traverse(function (obj) {
-          if (obj.geometry && obj.geometry.dispose) obj.geometry.dispose();
-          if (obj.material) {
-            if (Array.isArray(obj.material)) {
-              obj.material.forEach(function (m) { if (m && m.dispose) m.dispose(); });
-            } else if (obj.material.dispose) {
-              obj.material.dispose();
-            }
-          }
-        });
-      }
-    } catch (e1) {}
-    try {
-      if (entry.renderer) {
-        entry.renderer.dispose();
-        if (entry.renderer.forceContextLoss) entry.renderer.forceContextLoss();
-      }
-    } catch (e2) {}
-    try {
-      if (entry.el && entry.el.parentNode) entry.el.parentNode.removeChild(entry.el);
-    } catch (e3) {}
   }
 
   function capDpr() {
@@ -172,13 +128,7 @@ window.SB = window.SB || {};
     clock = new THREE.Clock();
     function tick() {
       raf = requestAnimationFrame(tick);
-      if (paused || reduce || document.hidden) {
-        /* Still finish theme blend so colors settle while paused */
-        if (themeBlend.active) tickThemeBlend(performance.now());
-        return;
-      }
-      var now = performance.now();
-      if (themeBlend.active) tickThemeBlend(now);
+      if (paused || reduce || document.hidden) return;
       var t = clock.getElapsedTime();
       for (var i = 0; i < scenes.length; i++) {
         var s = scenes[i];
@@ -200,43 +150,6 @@ window.SB = window.SB || {};
     return light
       ? { teal: 0x0d9488, violet: 0x7c3aed, deep: 0xf2f5fd }
       : { teal: 0x2dd4bf, violet: 0xa78bfa, deep: 0x060a14 };
-  }
-
-  function lerpChannel(a, b, t) {
-    return ((a + (b - a) * t) | 0);
-  }
-
-  function lerpHex(a, b, t) {
-    var ar = (a >> 16) & 255, ag = (a >> 8) & 255, ab = a & 255;
-    var br = (b >> 16) & 255, bg = (b >> 8) & 255, bb = b & 255;
-    return (lerpChannel(ar, br, t) << 16) | (lerpChannel(ag, bg, t) << 8) | lerpChannel(ab, bb, t);
-  }
-
-  function lerpBrand(from, to, t) {
-    return {
-      teal: lerpHex(from.teal, to.teal, t),
-      violet: lerpHex(from.violet, to.violet, t),
-      deep: lerpHex(from.deep, to.deep, t),
-    };
-  }
-
-  function applyBrandToScenes(c) {
-    themeBlend.cur = c;
-    for (var i = 0; i < scenes.length; i++) {
-      if (scenes[i].syncTheme) scenes[i].syncTheme(c);
-    }
-  }
-
-  function easeOutCubic(t) {
-    return 1 - Math.pow(1 - t, 3);
-  }
-
-  function tickThemeBlend(now) {
-    if (!themeBlend.active || !themeBlend.from || !themeBlend.to) return;
-    var u = Math.min(1, (now - themeBlend.t0) / themeBlend.durMs);
-    var e = easeOutCubic(u);
-    applyBrandToScenes(lerpBrand(themeBlend.from, themeBlend.to, e));
-    if (u >= 1) themeBlend.active = false;
   }
 
   /* ---------- Full-bleed background ---------- */
@@ -369,8 +282,8 @@ window.SB = window.SB || {};
         points.rotation.y = t * 0.015;
         points2.rotation.y = -t * 0.012;
       },
-      syncTheme: function (c) {
-        c = c || brandColors();
+      syncTheme: function () {
+        var c = brandColors();
         waveMat.color.setHex(c.teal);
         wave2.material.color.setHex(c.violet);
         pMat.color.setHex(c.teal);
@@ -383,7 +296,6 @@ window.SB = window.SB || {};
     sizeRenderer(entry, vp0.w, vp0.h);
     bindResize(entry, wrap);
     scenes.push(entry);
-    themeBlend.cur = colors;
 
     /* Dim CSS beams/spotlight so Three owns the atmosphere */
     document.documentElement.classList.add("sb-has-three");
@@ -459,8 +371,8 @@ window.SB = window.SB || {};
         ring2.rotation.z = -t * 0.4 * speed;
         sphere.scale.setScalar(1 + Math.sin(t * 1.2 * speed) * 0.04);
       },
-      syncTheme: function (c) {
-        c = c || brandColors();
+      syncTheme: function () {
+        var c = brandColors();
         sphere.material.color.setHex(c.teal);
         ring.material.color.setHex(c.violet);
         ring2.material.color.setHex(c.teal);
@@ -643,8 +555,8 @@ window.SB = window.SB || {};
         pts.rotation.y = t * 0.12;
         pts2.rotation.y = -t * 0.08;
       },
-      syncTheme: function (c) {
-        c = c || brandColors();
+      syncTheme: function () {
+        var c = brandColors();
         mat.color.setHex(c.teal);
         mat2.color.setHex(c.violet);
         glow.material.color.setHex(c.teal);
@@ -659,20 +571,9 @@ window.SB = window.SB || {};
   }
 
   function syncAllThemes() {
-    var to = brandColors();
-    if (shouldReduce()) {
-      themeBlend.active = false;
-      applyBrandToScenes(to);
-      return;
+    for (var i = 0; i < scenes.length; i++) {
+      if (scenes[i].syncTheme) scenes[i].syncTheme();
     }
-    themeBlend.from = themeBlend.cur || brandColors();
-    /* If mid-blend, continue from current interpolated color */
-    if (themeBlend.active && themeBlend.cur) themeBlend.from = themeBlend.cur;
-    themeBlend.to = to;
-    themeBlend.t0 = performance.now();
-    themeBlend.active = true;
-    /* Ensure loop runs so blend advances even if paused for other reasons */
-    if (!running) startLoop();
   }
 
   function applyMotionPolicy() {
@@ -685,9 +586,8 @@ window.SB = window.SB || {};
   SB.mountThreeFX = function () {
     if (SB._threeMounted) return;
     if (!window.THREE) return;
-    if (!threeFxEnabled() || shouldReduce()) {
+    if (shouldReduce()) {
       document.documentElement.classList.add("sb-three-paused");
-      document.documentElement.classList.remove("sb-has-three");
       return;
     }
 
@@ -709,12 +609,9 @@ window.SB = window.SB || {};
         obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
       }
 
-      if (!SB._threeVisBound) {
-        SB._threeVisBound = true;
-        document.addEventListener("visibilitychange", function () {
-          if (!document.hidden && threeFxEnabled() && !shouldReduce()) paused = false;
-        });
-      }
+      document.addEventListener("visibilitychange", function () {
+        if (!document.hidden && !shouldReduce()) paused = false;
+      });
 
     } catch (err) {
       console.warn("SB.mountThreeFX failed:", err);
@@ -727,54 +624,14 @@ window.SB = window.SB || {};
   };
 
   SB.resumeThreeFX = function () {
-    if (!threeFxEnabled() || shouldReduce()) return;
-    if (!SB._threeMounted) {
-      SB.mountThreeFX();
-      return;
-    }
+    if (shouldReduce()) return;
     paused = false;
     document.documentElement.classList.remove("sb-three-paused");
     if (scenes.length) startLoop();
   };
 
-  /** Tear down WebGL canvases + stop rAF when Settings disables Three FX. */
-  SB.disposeThreeFX = function () {
-    stopLoop();
-    paused = true;
-    for (var i = 0; i < scenes.length; i++) {
-      disposeEntry(scenes[i]);
-    }
-    scenes.length = 0;
-    SB._threeMounted = false;
-    document.documentElement.classList.remove("sb-has-three");
-    document.documentElement.classList.add("sb-three-paused");
-    var leftover = document.querySelectorAll(".sb-three-bg, .sb-three-orb, .sb-three-hand");
-    for (var j = 0; j < leftover.length; j++) {
-      try {
-        if (leftover[j].parentNode) leftover[j].parentNode.removeChild(leftover[j]);
-      } catch (e) {}
-    }
-  };
-
-  /* Re-apply when settings toggle reduce motion / threeFx */
+  /* Re-apply when settings toggle reduce motion */
   SB.refreshThreeMotion = function () {
-    if (!threeFxEnabled()) {
-      SB.disposeThreeFX();
-      return;
-    }
-    if (!SB._threeMounted) {
-      SB.mountThreeFX();
-      return;
-    }
     applyMotionPolicy();
-  };
-
-  SB.applyThreeFxSetting = function () {
-    if (threeFxEnabled() && !shouldReduce()) {
-      if (!SB._threeMounted) SB.mountThreeFX();
-      else SB.resumeThreeFX();
-    } else {
-      SB.disposeThreeFX();
-    }
   };
 })();

@@ -17,11 +17,11 @@ For the frontend, open a **separate terminal** in the `sign-bridge` directory an
 python -m http.server 8000 --bind 127.0.0.1
 ```
 
-Then visit **`http://127.0.0.1:8000/`** (not `/sign-bridge/` when serving from this directory). Select **Live** to enable the temporary `lstm-live-test.js` adapter. The browser sends normalized 30-frame sequences directly to the local API and publishes the `signbridge:lstm-prediction` event consumed by the Translate view.
+Then visit **`http://127.0.0.1:8000/`** (not `/sign-bridge/` when serving from this directory). Select **Live** to enable the temporary `lstm-live-test.js` adapter. The browser sends normalized 60-frame sequences directly to the local API and publishes the `signbridge:lstm-prediction` event consumed by the Translate view.
 
 ## Input and output contract
 
-`POST /predict` expects `{ "frames": [ ...30 frames... ] }`. Each frame must match the `hands-arms-v2` recording format produced by `TrainingRecorder.createReadableFrame`: `leftHand`, `rightHand`, `pose` with shoulder-centered-v1 normalization. `ml/dataset.py` converts each frame to **146** ordered features. Do not change the normalization or feature ordering without retraining. Missing hands are supported.
+`POST /predict` expects `{ "frames": [ ...60 frames... ] }`. Each frame must match the `hands-arms-v2` recording format produced by `TrainingRecorder.createReadableFrame`: `leftHand`, `rightHand`, `pose` with shoulder-centered-v1 normalization. `ml/dataset.py` converts each frame to **146** ordered features. Do not change the normalization or feature ordering without retraining. Missing hands are supported.
 
 Response: `{ "prediction": "HELLO", "confidence": 0.99, "probabilities": { "HELLO": 0.99, "MY": 0.008, "NAME": 0.002 } }` (example only). Current model labels: HELLO, MY, NAME. There is no UNKNOWN/NO_SIGN class; confidence is not calibrated accuracy.
 

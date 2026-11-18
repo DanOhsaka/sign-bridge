@@ -2,7 +2,7 @@
   "name": "sign-bridge",
   "version": "0.0.0",
   "private": true,
-  "description": "SignBridge — static site plus Vercel Functions API. See docs/DEPLOY.md.",
+  "description": "SignBridge \u2014 static site plus Vercel Functions API. See docs/DEPLOY.md.",
   "engines": {
     "node": "24.x"
   },
@@ -13,5 +13,8 @@
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.0"
+  },
+  "scripts": {
+    "test:predict-proxy": "node --test tests/predict-proxy.test.cjs"
   }
 }

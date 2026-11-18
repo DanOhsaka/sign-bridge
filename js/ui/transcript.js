@@ -8,7 +8,7 @@
    Teaching design kept:
      • confidence is visible on every word (coloured underline)
      • low-confidence words unfold alternates inline
-     • source badge (Live) shown once for the stream
+     • source badge (Demo/Live) shown once for the stream
      • optional per-word timestamps + live-word pulse
      • aria-live so screen readers announce signing
    ============================================================ */
@@ -18,7 +18,8 @@ window.SB = window.SB || {};
 SB._TX_EMPTY_HTML =
   '<div class="empty tx-empty">' +
   '<div class="empty-title">Waiting for signs</div>' +
-  '<div class="empty-hint" id="txEmptyHint">Words stream here as one growing sentence when Live recognition is confident.</div>' +
+  '<div class="empty-hint" id="txEmptyHint">Words stream here as one growing sentence. Press ' +
+  '<span class="kbd">1</span>–<span class="kbd">9</span>, watch the demo, or switch to Live for hand tracking.</div>' +
   "</div>";
 
 function SB_formatClock(d) {
@@ -43,41 +44,16 @@ SB.Transcript = function (container, opts) {
   var lastWordEl = null;
   var startedAt = null;
 
-  function bubbleFor(tok) {
-    if (!openBubble) {
-      openBubble = document.createElement("div");
-      openBubble.className = "bubble is-" + (tok.source || "demo");
-
-      var now = new Date();
-      var head = document.createElement("div");
-      head.className = "bubble-head";
-      head.innerHTML =
-        '<span class="bubble-time">' +
-        String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0") +
-        "</span>" +
-        '<span class="bubble-src src-' + (tok.source || "demo") + '">' + (tok.source === "live" ? "● Live" : "● Demo") + "</span>";
-
-      var actions = document.createElement("div");
-      actions.className = "bubble-actions";
-      var speakBtn = document.createElement("button");
-      speakBtn.title = "Speak this out loud";
-      speakBtn.textContent = "🔊";
-      speakBtn.addEventListener("click", function () { SB.speak(self.bubbleText(openBubble)); });
-      var copyBtn = document.createElement("button");
-      copyBtn.title = "Copy this utterance";
-      copyBtn.textContent = "⧉";
-      copyBtn.addEventListener("click", function () { SB.copyText(self.bubbleText(openBubble)); });
-      actions.appendChild(speakBtn);
-      actions.appendChild(copyBtn);
-      head.appendChild(actions);
-
-      var words = document.createElement("div");
-      words.className = "bubble-words";
-
-      openBubble.appendChild(head);
-      openBubble.appendChild(words);
-      el.appendChild(openBubble);
-      scrollToLatest();
+  function setWorkspaceStatus(mode, live) {
+    var status = document.getElementById("txStatus");
+    var dot = document.getElementById("txLiveDot");
+    if (status) {
+      status.textContent = mode || "Idle";
+      status.classList.toggle("is-live", !!live);
+      status.classList.toggle("is-active", mode === "Streaming" || mode === "Live");
+    }
+    if (dot) {
+      dot.classList.toggle("is-on", !!live || mode === "Streaming");
     }
   }
 
@@ -112,8 +88,10 @@ SB.Transcript = function (container, opts) {
       var meta = document.createElement("div");
       meta.className = "stream-meta";
       sourceEl = document.createElement("span");
-      sourceEl.className = "stream-src src-" + (tok.source || "live");
-      sourceEl.textContent = "● Live";
+      sourceEl.className = "stream-src src-" + (tok.source || "demo");
+      sourceEl.textContent = tok.source === "live" || tok.source === "lstm"
+        ? "● Live"
+        : "● Demo";
       meta.appendChild(sourceEl);
 
       var hint = document.createElement("span");
@@ -136,11 +114,13 @@ SB.Transcript = function (container, opts) {
       el.appendChild(stream);
       setWorkspaceStatus("Streaming", tok.source === "live" || tok.source === "lstm");
     } else if (sourceEl && tok.source) {
-      sourceEl.className = "stream-src src-" + (tok.source || "live");
-      sourceEl.textContent = "● Live";
+      sourceEl.className = "stream-src src-" + tok.source;
+      sourceEl.textContent = tok.source === "live" || tok.source === "lstm"
+        ? "● Live"
+        : "● Demo";
       setWorkspaceStatus(
-        tok.source === "lstm" ? "Live" : "Streaming",
-        true
+        tok.source === "live" || tok.source === "lstm" ? "Live" : "Streaming",
+        tok.source === "live" || tok.source === "lstm"
       );
     }
     return sentence;
@@ -231,17 +211,18 @@ SB.Transcript = function (container, opts) {
       sentence.appendChild(span);
     }
 
-    scrollToLatest();
+    updateCurrentSign(tok);
+
+    /* keep the newest word in view */
+    el.scrollTop = el.scrollHeight;
     if (opts.onToken) opts.onToken(tok);
   };
 
-  /* Keep the newest guess at the bottom of the transcript pane. */
-  function scrollToLatest() {
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }
-
-  /* end the current utterance */
-  self.endUtterance = function () { openBubble = null; };
+  /* mark a soft pause between phrases — does NOT open a new card */
+  self.endUtterance = function () {
+    if (sentence && sentence.querySelector(".word")) pendingBreak = true;
+    if (lastWordEl) lastWordEl.classList.remove("is-live-word");
+  };
 
   self.bubbleText = function () {
     return self.allText();

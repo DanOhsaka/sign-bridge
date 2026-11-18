@@ -1,6 +1,6 @@
 /* ============================================================
    SignBridge — LSTM prediction proxy
-   The browser posts 30 shoulder-centered frames here.
+   The browser posts 60 normalized frames here.
    This route forwards that body to the local Python model
    and returns its JSON. It does not use MongoDB.
    ============================================================ */
@@ -19,7 +19,7 @@ router.post("/", async function (req, res) {
 
   if (!Array.isArray(frames) || frames.length !== 60) {
     return res.status(400).json({
-      message: "Expected exactly 30 frames."
+      message: "Expected exactly 60 frames."
     });
   }
 

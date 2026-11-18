@@ -16,8 +16,6 @@ SB.SettingsView = function () {
     bindToggle("setMirror", "mirror");
     bindToggle("setLandmarks", "landmarks");
     bindToggle("setReduceMotion", "reduceMotion");
-    bindToggle("setThreeFx", "threeFx");
-    bindToggle("setPerfHud", "perfHud");
     bindRate();
     bindThreshold();
     bindReset();
@@ -112,14 +110,6 @@ SB.SettingsView = function () {
         SB.applyTheme();
         if (SB.refreshThreeMotion) SB.refreshThreeMotion();
       }
-      if (key === "threeFx") {
-        if (SB.applyThreeFxSetting) SB.applyThreeFxSetting();
-        else if (SB.refreshThreeMotion) SB.refreshThreeMotion();
-        SB.toast(
-          SB.settings.threeFx ? "Interactive background on" : "Interactive background off",
-          "info"
-        );
-      }
       /* Keep live camera overlay/mirror in sync with settings drawer */
       try {
         var eng = SB.Engine && SB.Engine.getLiveEngine && SB.Engine.getLiveEngine();
@@ -130,7 +120,6 @@ SB.SettingsView = function () {
             var stage = SB.$("#stage");
             if (stage) stage.classList.toggle("is-mirror", !!SB.settings.mirror && stage.classList.contains("is-cam"));
           }
-          if (key === "perfHud" && eng.setShowHud) eng.setShowHud(!!SB.settings.perfHud);
         }
       } catch (e) {}
     });
@@ -177,10 +166,6 @@ SB.SettingsView = function () {
     if (landmarks) landmarks.classList.toggle("is-on", SB.settings.landmarks);
     var reduce = SB.$("#setReduceMotion");
     if (reduce) reduce.classList.toggle("is-on", SB.settings.reduceMotion);
-    var threeFx = SB.$("#setThreeFx");
-    if (threeFx) threeFx.classList.toggle("is-on", SB.settings.threeFx !== false);
-    var perfHud = SB.$("#setPerfHud");
-    if (perfHud) perfHud.classList.toggle("is-on", !!SB.settings.perfHud);
     var rate = SB.$("#setRate");
     var rateVal = SB.$("#setRateVal");
     if (rate) {

@@ -86,3 +86,13 @@ curl https://signbridge-lilac-zeta.vercel.app/api/health
 - `503 {"message":"Database unavailable."}` — the connection threw outright.
 - `FUNCTION_INVOCATION_FAILED` — a module failed to load. Check the build log for
   which files Vercel bundled, and that nothing imports from `server/`.
+
+## Mobile site
+
+There are two sets of pages: desktop (repo root) and phone (`m/`: index, practice, learn, login, register).
+`js/device.js` runs first in `<head>` of every page, senses the device, and redirects before anything paints.
+Phone pages for: phone user-agent, touch-only small screen, or a window 640px wide or less (re-checked on resize).
+Force a set for testing with `?view=mobile`, `?view=desktop` or `?view=auto` (lasts for that browser tab).
+Both sets share `js/` and the base styles; only the HTML and `styles/mobile.css` are phone-specific.
+If you edit a page's markup or scripts, make the matching edit in its twin.
+Resource URLs written relative to the site root inside JS (e.g. a Worker) must use `SB.root`, which is `"../"` on phone pages.

@@ -2,15 +2,15 @@
     "use strict";
 
     // Node proxy on the same origin. The server forwards to the Python model.
-    const API_URL = "http://127.0.0.1:3000/api/predict";
+    const API_URL = "/api/predict";
     const SEQUENCE_LENGTH = 60;
-    // Classify the latest 30 frames again after this many new detections.
+    // Classify the latest 60-frame window again after this many new detections.
     const STRIDE = 8;
     // One agreeing window is not enough; the next stride must match
     // before the transcript changes.
     const STABLE_COUNT = 2;
 
-    const MIN_CONFIDENCE = 0.80;
+    const MIN_CONFIDENCE = 0.90;
 
     let active = false;
     let sending = false;
@@ -75,7 +75,6 @@
         session++;
         resetSequence();
         active = true;
-        sending = false;
 
         console.log("SignBridge live LSTM test started");
     }
@@ -216,7 +215,6 @@
             return;
         }
 
-        /* Always keep the latest window — do not stall collection while HTTP is in flight. */
         frames.push(frame);
         frameTimes.push(performance.now());
         if (frames.length > SEQUENCE_LENGTH) {
