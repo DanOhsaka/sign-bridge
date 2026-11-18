@@ -380,15 +380,13 @@
 .transcript-card {
   display: flex;
   flex-direction: column;
-  /* Fill useful space without forcing a full-viewport opaque slab that
-     buries the Three.js atmosphere. */
-  min-height: min(640px, calc(100vh - 160px));
+  height: calc(100vh - 140px);
+  min-height: 420px;
   max-height: calc(100vh - 140px);
   height: auto;
   position: sticky;
   top: 20px;
   overflow: hidden;
-  box-sizing: border-box;
 }
 
 .tx-head {
@@ -512,9 +510,9 @@
 .transcript {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-x: hidden;
   overflow-y: auto;
-  padding: 18px 22px 20px;
+  scroll-behavior: smooth;
+  padding: 16px 18px;
   display: flex;
   flex-direction: column;
   -webkit-overflow-scrolling: touch;
@@ -721,6 +719,7 @@
 
 /* Legacy bubble styles kept for Learn/Practice mini-transcripts */
 .bubble {
+  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);
@@ -764,6 +763,58 @@
   font-size: var(--fs-xl);
   line-height: 1.55;
 }
+
+/* Live guesses are one sign per line so the pane can scroll. */
+.bubble.is-live .bubble-words {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.word {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 7px;
+  transition: background var(--t-fast);
+}
+.word:hover { background: var(--surface-3); }
+.word::after {
+  content: "";
+  position: absolute;
+  left: 4px; right: 4px; bottom: 1px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--green);
+  width: calc(100% - 8px);
+}
+.word.is-mid::after { background: var(--amber); }
+.word.is-low::after  { background: var(--red); }
+.word .conf-val {
+  position: absolute;
+  top: -14px; right: 2px;
+  font-size: 9.5px;
+  font-weight: 700;
+  color: var(--text-3);
+  background: var(--surface-3);
+  padding: 0 5px;
+  border-radius: 5px;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+  pointer-events: none;
+  white-space: nowrap;
+}
+.word:hover .conf-val { opacity: 1; }
+
+.word-alts {
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  margin: 4px 4px 2px;
+  animation: popIn var(--t-med) var(--ease);
+}
+.word-alts .alt-btn { font-size: var(--fs-xs); padding: 2px 10px; }
+
 .bubble-foot {
   margin-top: 8px;
   font-size: 10.5px;
@@ -1496,11 +1547,9 @@
   .view--translate { grid-template-columns: 1fr; }
   .transcript-card {
     position: static;
-    height: auto;
-    min-height: 480px;
-    max-height: none;
+    height: 520px;
+    max-height: 520px;
   }
-  .tx-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .params-grid { grid-template-columns: repeat(2, 1fr); }
   .practice-grid { grid-template-columns: 1fr; }
   .letter-pad { grid-template-columns: repeat(7, minmax(0, 1fr)); }
