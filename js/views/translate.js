@@ -13,6 +13,14 @@ SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
   var lastPrediction = null;
+  /* Adaptive confirm: high-confidence static glosses commit faster. */
+  var pending = null; /* { text, conf, source, firstMs, lastMs, glyph, alt } */
+  var confirmTimer = null;
+  /* Same gloss appends once until pose changes or hand leaves the frame. */
+  var lockedGloss = null; /* lowercase text last committed while hand stayed up */
+  var poseChangeNeeded = false; /* after commit, require a different held gloss */
+  var cameraOn = true; /* Camera chip — off stops tracks; on restarts Live */
+  var liveStarting = false;
 
   function live() { return SB.Engine.getLiveEngine(); }
 
