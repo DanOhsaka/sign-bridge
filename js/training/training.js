@@ -1,7 +1,7 @@
 // js/training/training.js
 (function () {
 
-  const FRAME_COUNT = 60;
+  const FRAME_COUNT = 30;
 
   // MediaPipe's 21 hand landmark names.
   const HAND_NAMES = [
@@ -516,7 +516,7 @@
     );
 
 
-    // The local server writes training-data/<LABEL>/<LABEL>_NNN.json.
+    // Keep using the original storage function.
     saveTrainingSample(sample);
 
 

@@ -380,13 +380,15 @@
 .transcript-card {
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 140px);
-  min-height: 420px;
+  /* Fill useful space without forcing a full-viewport opaque slab that
+     buries the Three.js atmosphere. */
+  min-height: min(640px, calc(100vh - 160px));
   max-height: calc(100vh - 140px);
   height: auto;
   position: sticky;
   top: 20px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .tx-head {
@@ -719,7 +721,6 @@
 
 /* Legacy bubble styles kept for Learn/Practice mini-transcripts */
 .bubble {
-  flex: 0 0 auto;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: var(--surface-2);

@@ -75,9 +75,10 @@ def predict_sign(file_path, model, class_names):
             f"model input {model.input_shape[1:]}"
         )
 
-    # Same forward pass the live API uses.
-    probabilities = np.asarray(
-        model(X, training=False)
+    # Run inference.
+    probabilities = model.predict(
+        X,
+        verbose=0
     )[0]
 
     predicted_index = int(np.argmax(probabilities))

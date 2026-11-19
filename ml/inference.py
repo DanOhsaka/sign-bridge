@@ -7,7 +7,7 @@ import tensorflow as tf
 from .dataset import frame_to_features
 
 
-SEQUENCE_LENGTH = 60
+SEQUENCE_LENGTH = 30
 FEATURE_COUNT = 146
 
 
@@ -78,25 +78,18 @@ class SignBridgeLSTM:
 
         X = np.expand_dims(sequence, axis=0)
 
-        # Direct forward pass. model.predict() rebuilds a
-        # one-sample prediction path on every live request.
-        probabilities = np.asarray(
-            self.model(X, training=False)
+        probabilities = self.model.predict(
+            X,
+            verbose=0
         )[0]
 
         predicted_index = int(np.argmax(probabilities))
-        predicted_label = self.labels[predicted_index]
-        confidence = float(probabilities[predicted_index])
-
-        MIN_CONFIDENCE = 0.90
-
-        if confidence < MIN_CONFIDENCE:
-            predicted_label = "NONE"
-
 
         return {
-            "prediction": predicted_label,
-            "confidence": confidence,
+            "prediction": self.labels[predicted_index],
+            "confidence": float(
+                probabilities[predicted_index]
+            ),
             "probabilities": {
                 label: float(probabilities[index])
                 for index, label in enumerate(self.labels)
