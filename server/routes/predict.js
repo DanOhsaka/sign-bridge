@@ -17,7 +17,7 @@ function lstmUrl() {
 router.post("/", async function (req, res) {
   var frames = req.body && req.body.frames;
 
-  if (!Array.isArray(frames) || frames.length !== 30) {
+  if (!Array.isArray(frames) || frames.length !== 60) {
     return res.status(400).json({
       message: "Expected exactly 30 frames."
     });

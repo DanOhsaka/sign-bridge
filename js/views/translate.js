@@ -12,14 +12,7 @@ window.SB = window.SB || {};
 SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
-  /* Adaptive confirm: high-confidence static glosses commit faster. */
-  var pending = null; /* { text, conf, source, firstMs, lastMs, glyph, alt } */
-  var confirmTimer = null;
-  /* Same gloss appends once until pose changes or hand leaves the frame. */
-  var lockedGloss = null; /* lowercase text last committed while hand stayed up */
-  var poseChangeNeeded = false; /* after commit, require a different held gloss */
-  var cameraOn = true; /* Camera chip — off stops tracks; on restarts Live */
-  var liveStarting = false;
+  var lastPrediction = null;
 
   function live() { return SB.Engine.getLiveEngine(); }
 
@@ -205,11 +198,20 @@ SB.TranslateView = function () {
           return;
         }
 
-        considerLiveToken({
+        if (result.prediction === lastPrediction) {
+          return;
+        }
+
+        lastPrediction = result.prediction;
+
+        var token = {
           text: result.prediction,
           conf: result.confidence,
-          source: "lstm",
-        });
+          source: "live"
+        };
+
+        transcript.addToken(token);
+        spotlight.show(token);
 
         console.log(
           "SignBridge transcript candidate:",
