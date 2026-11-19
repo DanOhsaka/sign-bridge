@@ -41,7 +41,7 @@ SB.TranslateView = function () {
   }
 
   /**
-   * Live recognition: Holistic + Python LSTM (/api/predict → :9001).
+   * Live recognition: Pose Lite + Hand Landmarker + Python LSTM (/api/predict → :9001).
    * Detach the experimental landmark→Hello/Yes gloss heuristic (wrong signs).
    * No-spam lock below still applies when LSTM tokens arrive.
    */
@@ -180,6 +180,7 @@ SB.TranslateView = function () {
 
   function init() {
     transcript = new SB.Transcript(SB.$("#transcript"));
+    if (SB.Captions) SB.Captions.attach(transcript);   /* phone pages only: captions over the video */
     spotlight = SB.Spotlight(SB.$("#spotlight"));
 
     SB.Engine.on("result", function (tok) {
@@ -239,7 +240,7 @@ SB.TranslateView = function () {
           (live().hasClassifier()
             ? "recognizing…"
             : (overlayOn
-              ? "landmark overlay on — waiting for Holistic + LSTM recognition."
+              ? "landmark overlay on — waiting for pose + LSTM recognition."
               : "tracking, but overlay is off — turn on Landmarks to see the skeleton."));
 
       } else {
@@ -458,6 +459,7 @@ SB.TranslateView = function () {
     var stage = SB.$("#stage");
     if (stage) {
       stage.classList.remove("is-cam", "is-mirror", "is-starting", "is-error");
+      stage.style.aspectRatio = "";
     }
     setStageOverlay(
       "waiting",
@@ -518,19 +520,23 @@ SB.TranslateView = function () {
       }
       setStageOverlay(null);
       stage.classList.add("is-cam");
+      if (SB.Device && SB.Device.isMobile && SB.$("#cam").videoWidth) {
+        /* keep the skeleton aligned to the real camera frame */
+        stage.style.aspectRatio = SB.$("#cam").videoWidth + " / " + SB.$("#cam").videoHeight;
+      }
       stage.classList.toggle("is-mirror", !!SB.settings.mirror);
 
       /* Detach bad gloss heuristic; keep any real setClassifier model. */
       ensureLiveRecognizer();
       var recogLabel = recognizerPillLabel();
 
-      /* Always wire Live → Holistic landmarks → SignBridgeLiveTest → /api/predict */
+      /* Always wire Live → pose + hand landmarks → SignBridgeLiveTest → /api/predict */
       var lstmOn = false;
       if (window.SignBridgeLiveTest &&
           typeof window.SignBridgeLiveTest.start === "function") {
         window.SignBridgeLiveTest.start();
         lstmOn = true;
-        recogLabel = recogLabel === "model ready" ? "model + LSTM" : "Holistic · LSTM";
+        recogLabel = recogLabel === "model ready" ? "model + LSTM" : "Pose · LSTM";
       }
 
       SB.$("#mirrorToggle").classList.toggle("is-on", !!SB.settings.mirror);
@@ -543,7 +549,7 @@ SB.TranslateView = function () {
       refreshCapturePanelVisibility();
       if (st) {
         st.innerHTML = lstmOn
-          ? '<span class="dot"></span>Live recognition on — Holistic + LSTM (<code>signbridge_lstm.keras</code>).'
+          ? '<span class="dot"></span>Live recognition on — Pose + LSTM (<code>signbridge_lstm.keras</code>).'
           : live().hasClassifier()
             ? '<span class="dot"></span>Live recognition on — trained classifier attached.'
             : '<span class="dot"></span>Camera ready — landmarks only. Waiting for LSTM recognition.';
@@ -551,14 +557,14 @@ SB.TranslateView = function () {
       if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
       if (transcript && transcript.setLiveHint) {
         transcript.setLiveHint(lstmOn
-          ? "Words stream here from the Keras LSTM when a 30-frame Holistic window is confident."
+          ? "Words stream here from the Keras LSTM when a 60-frame pose window is confident."
           : live().hasClassifier()
             ? "Words stream here as one sentence when the model is confident."
             : "Live tracks hands. Transcript words appear when the LSTM is confident.");
       }
 
       SB.toast(lstmOn
-        ? "Live on — Holistic tracking + Keras LSTM"
+        ? "Live on — pose tracking + Keras LSTM"
         : live().hasClassifier()
           ? "Live engine on — hand tracking + your classifier"
           : "Live on — landmarks only. Waiting for LSTM.", "ok");

@@ -104,6 +104,7 @@ SB.SettingsView = function () {
 
   function bindToggle(id, key) {
     var btn = SB.$("#" + id);
+    if (!btn) return;   /* not every page's settings drawer has every toggle */
     btn.addEventListener("click", function () {
       SB.settings[key] = !SB.settings[key];
       SB.saveSettings();

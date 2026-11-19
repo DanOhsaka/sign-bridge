@@ -1,27 +1,41 @@
 /* ============================================================
-   SignBridge — Hand / Holistic landmarker Web Worker (classic)
+   SignBridge — Pose + hand landmarker Web Worker (classic)
    Must be a classic worker: MediaPipe's WASM loader calls
    importScripts(), which module workers disallow.
+   Dynamic import() loads the ESM vision bundle.
 
-   Default model: HandLandmarker (fast skeleton). Holistic is
-   optional when pose is required (training / LSTM).
+   Two model kinds (chosen by live.js via msg.model):
+
+     "pose"  Pose Landmarker Lite (shoulders / elbows / wrists)
+             + Hand Landmarker (both 21-point hands). This is the
+             pipeline the LSTM was trained on. The posted result
+             keeps the left / right / pose shape the LSTM frame
+             builder expects. NOT Holistic.
+
+     "hands" Hand Landmarker only. Fast; used where pose is not
+             needed (Practice letter drills).
+
+   "holistic" is still accepted as an alias for "pose" so an old
+   cached live.js cannot select a model that no longer exists.
    ============================================================ */
 
-var landmarker = null;
-var modelKind = "hands"; /* "hands" | "holistic" */
+var modelKind = "hands"; /* "hands" | "pose" */
+var visionFileset = null;
 var FilesetResolver = null;
 var HandLandmarker = null;
-var HolisticLandmarker = null;
-var visionFileset = null;
+var PoseLandmarker = null;
+
+var poseLandmarker = null;
+var handLandmarker = null;
+
+var POSE_MODEL =
+  "https://storage.googleapis.com/mediapipe-models/" +
+  "pose_landmarker/pose_landmarker_lite/float16/1/" +
+  "pose_landmarker_lite.task";
 
 var HAND_MODEL =
   "https://storage.googleapis.com/mediapipe-models/" +
   "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
-
-var HOLISTIC_MODEL =
-  "https://storage.googleapis.com/mediapipe-models/" +
-  "holistic_landmarker/holistic_landmarker/float16/1/" +
-  "holistic_landmarker.task";
 
 function serializePoints(list) {
   if (!list || !list.length) return null;
@@ -43,98 +57,145 @@ function serializeGroups(list) {
 }
 
 async function ensureVision() {
-  if (visionFileset && HandLandmarker && HolisticLandmarker) return;
+  if (visionFileset && HandLandmarker && PoseLandmarker) return;
   var visionModule = await import(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm"
   );
   FilesetResolver = visionModule.FilesetResolver;
   HandLandmarker = visionModule.HandLandmarker;
-  HolisticLandmarker = visionModule.HolisticLandmarker;
+  PoseLandmarker = visionModule.PoseLandmarker;
   visionFileset = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
   );
 }
 
-function closeLandmarker() {
-  if (landmarker && typeof landmarker.close === "function") {
-    try { landmarker.close(); } catch (e) {}
+function closeOne(lm) {
+  if (lm && typeof lm.close === "function") {
+    try { lm.close(); } catch (e) {}
   }
-  landmarker = null;
 }
 
-function buildHandOpts(delegate) {
+function closeLandmarkers() {
+  closeOne(poseLandmarker);
+  closeOne(handLandmarker);
+  poseLandmarker = null;
+  handLandmarker = null;
+}
+
+/* Hand-only drills: detect a bit stricter, keep tracking lower so
+   face-edge flicker does not flip presence every frame. */
+function buildHandOptsFast(delegate) {
   return {
-    baseOptions: {
-      modelAssetPath: HAND_MODEL,
-      delegate: delegate,
-    },
+    baseOptions: { modelAssetPath: HAND_MODEL, delegate: delegate },
     runningMode: "VIDEO",
     numHands: 2,
-    /* Detect a bit stricter; keep tracking lower so face-edge flicker
-       does not flip presence every frame (pass 6 hysteresis). */
     minHandDetectionConfidence: 0.55,
     minHandPresenceConfidence: 0.5,
     minTrackingConfidence: 0.4,
   };
 }
 
-function buildHolisticOpts(delegate) {
+/* LSTM pipeline: thresholds the training frames were captured with. */
+function buildHandOptsLstm(delegate) {
   return {
-    baseOptions: {
-      modelAssetPath: HOLISTIC_MODEL,
-      delegate: delegate,
-    },
+    baseOptions: { modelAssetPath: HAND_MODEL, delegate: delegate },
     runningMode: "VIDEO",
-    outputFaceBlendshapes: false,
-    outputPoseSegmentationMasks: false,
-    minHandDetectionConfidence: 0.5,
-    minHandPresenceConfidence: 0.5,
-    minPoseDetectionConfidence: 0.5,
-    minPosePresenceConfidence: 0.5,
+    numHands: 2,
+    minHandDetectionConfidence: 0.3,
+    minHandPresenceConfidence: 0.3,
+    minTrackingConfidence: 0.3,
+  };
+}
+
+function buildPoseOpts(delegate) {
+  return {
+    baseOptions: { modelAssetPath: POSE_MODEL, delegate: delegate },
+    runningMode: "VIDEO",
+    numPoses: 1,
+    minPoseDetectionConfidence: 0.4,
+    minPosePresenceConfidence: 0.4,
+    minTrackingConfidence: 0.4,
   };
 }
 
 async function createModel(kind, preferGpu) {
   await ensureVision();
-  closeLandmarker();
-  modelKind = kind === "holistic" ? "holistic" : "hands";
+  closeLandmarkers();
+  modelKind = (kind === "pose" || kind === "holistic") ? "pose" : "hands";
 
-  var tryGpu = preferGpu !== false;
-  var delegates = tryGpu ? ["GPU", "CPU"] : ["CPU"];
+  var delegates = preferGpu !== false ? ["GPU", "CPU"] : ["CPU"];
   var lastErr = null;
 
   for (var i = 0; i < delegates.length; i++) {
     var del = delegates[i];
     try {
-      if (modelKind === "holistic") {
-        landmarker = await HolisticLandmarker.createFromOptions(
-          visionFileset,
-          buildHolisticOpts(del)
+      if (modelKind === "pose") {
+        poseLandmarker = await PoseLandmarker.createFromOptions(
+          visionFileset, buildPoseOpts(del)
+        );
+        handLandmarker = await HandLandmarker.createFromOptions(
+          visionFileset, buildHandOptsLstm(del)
         );
       } else {
-        landmarker = await HandLandmarker.createFromOptions(
-          visionFileset,
-          buildHandOpts(del)
+        handLandmarker = await HandLandmarker.createFromOptions(
+          visionFileset, buildHandOptsFast(del)
         );
       }
       return {
         delegate: del,
         model: modelKind,
-        fallback: del === "CPU" && tryGpu ? "GPU create failed" : null,
+        fallback: del === "CPU" && preferGpu !== false ? "GPU create failed" : null,
       };
     } catch (err) {
       lastErr = err;
+      closeLandmarkers();
     }
   }
   throw lastErr || new Error("Landmarker create failed");
 }
 
+function handLabel(entry) {
+  var top = entry && entry[0];
+  if (!top) return "";
+  return top.categoryName || top.displayName || "";
+}
+
+/* Pose mode: Hand Landmarker's anatomical Left/Right become the
+   left / right arrays (first of each), exactly as the LSTM saw. */
+function poseModePayload(pose, hands) {
+  var left = null;
+  var right = null;
+  var lms = (hands && hands.landmarks) || [];
+  var handed = (hands && (hands.handedness || hands.handednesses)) || [];
+  for (var i = 0; i < lms.length; i++) {
+    var name = handLabel(handed[i]);
+    if (name === "Right") {
+      if (!right) right = lms[i];
+    } else if (name === "Left") {
+      if (!left) left = lms[i];
+    }
+  }
+  var lh = serializeGroups(left ? [left] : []);
+  var rh = serializeGroups(right ? [right] : []);
+  var payload = {
+    leftHandLandmarks: lh,
+    rightHandLandmarks: rh,
+    poseLandmarks: serializeGroups(pose && pose.landmarks),
+    detections: [],
+  };
+  for (var li = 0; li < lh.length; li++) {
+    payload.detections.push({ landmarks: lh[li], label: "left", score: 0.85 });
+  }
+  for (var ri = 0; ri < rh.length; ri++) {
+    payload.detections.push({ landmarks: rh[ri], label: "right", score: 0.85 });
+  }
+  return payload;
+}
+
 /**
  * HandLandmarker returns landmarks[] + handedness[] (categoryName Left/Right).
- * Map into Holistic-shaped left/right groups for the rest of the pipeline.
- * Mirror-aware: MediaPipe labels are from the subject's view; with a selfie
- * camera the engine may swap — live.js mirror is display-only, so we keep
- * anatomical labels from the model.
+ * Map into left/right groups plus a detections[] list; live.js prefers
+ * detections.
  */
 function handsToGroups(results) {
   var left = [];
@@ -153,7 +214,6 @@ function handsToGroups(results) {
       if (typeof h[0].score === "number") score = h[0].score;
     }
     detections.push({ landmarks: pts, label: label, score: score });
-    /* Keep legacy groups for older consumers — live.js prefers detections. */
     if (label.indexOf("left") >= 0) left.push(pts);
     else if (label.indexOf("right") >= 0) right.push(pts);
     else if (!right.length) right.push(pts);
@@ -171,8 +231,7 @@ self.onmessage = function (ev) {
   var msg = ev.data || {};
 
   if (msg.type === "init" || msg.type === "reinit") {
-    var kind = msg.model === "holistic" ? "holistic" : "hands";
-    createModel(kind, msg.preferGpu !== false)
+    createModel(msg.model, msg.preferGpu !== false)
       .then(function (info) {
         self.postMessage({
           type: "ready",
@@ -190,35 +249,27 @@ self.onmessage = function (ev) {
   }
 
   if (msg.type === "detect") {
-    if (!landmarker) {
+    var ready = modelKind === "pose"
+      ? (poseLandmarker && handLandmarker)
+      : handLandmarker;
+    if (!ready) {
       if (msg.bitmap && msg.bitmap.close) msg.bitmap.close();
       self.postMessage({ type: "error", id: msg.id, error: "Landmarker not ready" });
       return;
     }
     try {
       var t0 = performance.now();
-      var results = landmarker.detectForVideo(msg.bitmap, msg.timestamp);
-      if (msg.bitmap && msg.bitmap.close) msg.bitmap.close();
-
       var payload;
-      if (modelKind === "holistic") {
-        var lh = serializeGroups(results.leftHandLandmarks);
-        var rh = serializeGroups(results.rightHandLandmarks);
-        payload = {
-          leftHandLandmarks: lh,
-          rightHandLandmarks: rh,
-          poseLandmarks: serializeGroups(results.poseLandmarks),
-          detections: [],
-        };
-        for (var li = 0; li < lh.length; li++) {
-          payload.detections.push({ landmarks: lh[li], label: "left", score: 0.85 });
-        }
-        for (var ri = 0; ri < rh.length; ri++) {
-          payload.detections.push({ landmarks: rh[ri], label: "right", score: 0.85 });
-        }
+      if (modelKind === "pose") {
+        var pose = poseLandmarker.detectForVideo(msg.bitmap, msg.timestamp);
+        var hands = handLandmarker.detectForVideo(msg.bitmap, msg.timestamp);
+        payload = poseModePayload(pose, hands);
       } else {
-        payload = handsToGroups(results);
+        payload = handsToGroups(
+          handLandmarker.detectForVideo(msg.bitmap, msg.timestamp)
+        );
       }
+      if (msg.bitmap && msg.bitmap.close) msg.bitmap.close();
 
       self.postMessage({
         type: "result",

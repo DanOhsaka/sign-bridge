@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="js/device.js"></script>
   <script>(function(){try{var s=JSON.parse(localStorage.getItem("sb.settings")||"{}");var t=s.theme||"dark";if(t==="auto")t=matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";document.documentElement.setAttribute("data-theme",t==="light"?"light":"dark");var d=sessionStorage.getItem("sb.navDir");if(d==="1"||d==="-1"||d==="0")document.documentElement.setAttribute("data-nav-dir",d);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();</script>
   <title>SignBridge — Live Translate</title>
   <meta name="description" content="SignBridge — a live sign-language translator and learning companion.">
@@ -254,9 +255,9 @@
 <script src="js/training/training.js?v=20261022l"></script>
 <script src="./js/engine/lstm-live-test.js?v=20261028lstm"></script>
 <script src="js/engine/handshapeClassifier.js?v=20261028local"></script>
-<script src="js/engine/live.js?v=20261028lstm"></script>
-<script src="js/views/translate.js?v=20261115wait"></script>
-<script src="js/views/settings.js?v=20261115three"></script>
+<script src="js/engine/live.js?v=20261117pose"></script>
+<script src="js/views/translate.js?v=20261117pose"></script>
+<script src="js/views/settings.js?v=20261117pose"></script>
 <script src="js/app.js?v=20261022l"></script>
 <script>
 /* nav pill init */

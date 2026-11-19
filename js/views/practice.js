@@ -231,7 +231,7 @@ SB.PracticeView = function () {
     } else if (recording) {
       meta.textContent = "Recording… keep the target handshape steady. Live preview on the pad.";
     } else if (clipReady) {
-      meta.textContent = "Clip ready (" + clipFeats.length + " landmark frames). Pick a letter on the pad or keyboard to grade.";
+      meta.textContent = "Clip ready (" + clipFeats.length + " landmark frames). Pick a letter on the pad" + (SB.Device && SB.Device.isMobile ? "" : " or keyboard") + " to grade.";
     } else if (clipBlobUrl) {
       meta.textContent = "Video preview saved, but no hand landmarks — record again with your hand in frame.";
     } else {
@@ -428,6 +428,7 @@ SB.PracticeView = function () {
     var stage = SB.$("#stage");
     if (stage) {
       stage.classList.remove("is-cam", "is-mirror", "is-starting", "is-error", "is-recording", "is-replay");
+      stage.style.aspectRatio = "";
     }
     setStageOverlay(
       "waiting",
@@ -474,6 +475,9 @@ SB.PracticeView = function () {
       setStageOverlay(null);
       if (stage) {
         stage.classList.add("is-cam");
+        if (SB.Device && SB.Device.isMobile && SB.$("#cam") && SB.$("#cam").videoWidth) {
+          stage.style.aspectRatio = SB.$("#cam").videoWidth + " / " + SB.$("#cam").videoHeight;
+        }
         stage.classList.toggle("is-mirror", !!SB.settings.mirror);
       }
       var mir = SB.$("#mirrorToggle");
@@ -718,7 +722,7 @@ SB.PracticeView = function () {
     if (recording) {
       fb.innerHTML = "<div><strong>Recording…</strong><p>Hold the target handshape steady. The pad previews live reads — press <strong>Stop</strong> when done.</p></div>";
     } else if (clipReady && clipFeats.length) {
-      fb.innerHTML = "<div><strong>Clip ready — pick a letter</strong><p>Tap the pad or press a key. We grade accuracy from the recorded landmark clip (not live).</p></div>";
+      fb.innerHTML = "<div><strong>Clip ready — pick a letter</strong><p>" + (SB.Device && SB.Device.isMobile ? "Tap the pad." : "Tap the pad or press a key.") + " We grade accuracy from the recorded landmark clip (not live).</p></div>";
     } else if (cameraOn) {
       fb.innerHTML = "<div><strong>Waiting for a clip…</strong><p>Press <strong>Record</strong>, sign the target, then <strong>Stop</strong>. Pick a letter to grade the clip.</p></div>";
     } else {

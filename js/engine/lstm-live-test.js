@@ -1,22 +1,85 @@
 (function () {
     "use strict";
 
-    // Node proxy on the same origin. The server forwards to the Python model.
-    const API_URL = "/api/predict";
-    const SEQUENCE_LENGTH = 30;
-    /* Keep overlap so the next window starts sooner after a send. */
-    const KEEP_AFTER_SEND = 12;
+    // Same-origin /api/predict first: it works from phones, Vercel and serve.py.
+    // On localhost only, fall back to the Node server on :3000 (a static
+    // server with no /api route answers 404/405 and we switch once, sticky).
+    const API_URLS = ["/api/predict"];
+    if (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname)) {
+        API_URLS.push("http://127.0.0.1:3000/api/predict");
+    }
+    let apiIdx = 0;
+    const SEQUENCE_LENGTH = 60;
+    // Classify the latest 30 frames again after this many new detections.
+    const STRIDE = 8;
+    // One agreeing window is not enough; the next stride must match
+    // before the transcript changes.
+    const STABLE_COUNT = 2;
+
+    const MIN_CONFIDENCE = 0.80;
 
     let active = false;
     let sending = false;
     let session = 0;
     let frames = [];
+    let framesSinceSend = 0;
     let lastSkipLog = 0;
-    let lastSendMs = 0;
+    let pendingLabel = null;
+    let pendingCount = 0;
+    let frameTimes = [];
+    let lastRateLog = 0;
+
+    function resetSequence() {
+        frames = [];
+        frameTimes = [];
+        framesSinceSend = 0;
+        pendingLabel = null;
+        pendingCount = 0;
+        sending = false;
+    }
+
+    function windowSpanMs() {
+        if (frameTimes.length < 2) return 0;
+        return frameTimes[frameTimes.length - 1] - frameTimes[0];
+    }
+
+    function signFramesPerSecond() {
+        const span = windowSpanMs();
+        if (span <= 0) return 0;
+        return ((frameTimes.length - 1) * 1000) / span;
+    }
+
+    function reportRate() {
+        const now = performance.now();
+        if (now - lastRateLog < 1000) return;
+        lastRateLog = now;
+
+        let camera = "";
+        const engine = window.SB &&
+            SB.Engine &&
+            SB.Engine.getLiveEngine &&
+            SB.Engine.getLiveEngine();
+        const perf = engine && engine.getPerfStats && engine.getPerfStats();
+        if (perf) {
+            camera =
+                " Camera " + perf.camFps.toFixed(0) +
+                "/s, hand detect " + perf.inferFps.toFixed(0) +
+                "/s (" + perf.inferMs.toFixed(0) + "ms), dropped " +
+                perf.dropped + ".";
+        }
+
+        console.log(
+            "Live pickup: sign model stored " +
+            signFramesPerSecond().toFixed(1) +
+            " frames/s. The last " + frameTimes.length +
+            " frames cover " + Math.round(windowSpanMs()) +
+            "ms." + camera
+        );
+    }
 
     function start() {
         session++;
-        frames = [];
+        resetSequence();
         active = true;
         sending = false;
 
@@ -26,20 +89,47 @@
     function stop() {
         session++;
         active = false;
-        sending = false;
-        frames = [];
+        resetSequence();
 
         console.log("SignBridge live LSTM test stopped");
     }
 
-    async function sendPrediction(sequence) {
+    function commitPrediction(result) {
+    if (!result || !result.prediction) {
+        return;
+    }
 
-        const requestSession = session;
-        sending = true;
-        const t0 = performance.now();
+    // Reject predictions with insufficient confidence
+    if (
+        typeof result.confidence !== "number" ||
+        result.confidence < MIN_CONFIDENCE
+    ) {
+        pendingLabel = null;
+        pendingCount = 0;
+        return;
+    }
+
+    if (result.prediction === pendingLabel) {
+        pendingCount++;
+    } else {
+        pendingLabel = result.prediction;
+        pendingCount = 1;
+    }
+
+    if (pendingCount < STABLE_COUNT) {
+        return;
+    }
+
+    window.dispatchEvent(
+        new CustomEvent("signbridge:lstm-prediction", {
+            detail: result
+        })
+    );
+}
+    async function sendPrediction(sequence, requestSession) {
 
         try {
-            const response = await fetch(API_URL, {
+            const response = await fetch(API_URLS[apiIdx], {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json"
@@ -50,6 +140,11 @@
             });
 
             if (!response.ok) {
+                if ((response.status === 404 || response.status === 405) &&
+                    apiIdx < API_URLS.length - 1) {
+                    apiIdx++;
+                    console.warn("No /api/predict on this origin; trying", API_URLS[apiIdx]);
+                }
                 const errorText = await response.text();
 
                 throw new Error(
@@ -58,40 +153,45 @@
             }
 
             const result = await response.json();
+                console.log("Raw LSTM prediction:", {
+                prediction: result.prediction,
+                confidence: result.confidence,
+                probabilities: result.probabilities
+                });
             if (!active || requestSession !== session) return;
 
-            result.apiMs = performance.now() - t0;
-
-            console.log("--------------------------");
-            console.log("SignBridge Live Prediction");
-            console.log("--------------------------");
-
-            console.log("Sign:", result.prediction);
-
-            console.log(
-                "Confidence:",
-                (result.confidence * 100).toFixed(2) + "%"
-            );
-
-            console.log("API ms:", result.apiMs.toFixed(0));
-
-            console.table(result.probabilities);
-
-            window.dispatchEvent(
-                new CustomEvent("signbridge:lstm-prediction", {
-                    detail: result
-                })
-            );
+            commitPrediction(result);
 
         } catch (error) {
+            if (error instanceof TypeError && apiIdx < API_URLS.length - 1) {
+                apiIdx++;   // network error on the first URL: try the next one
+            }
             if (active && requestSession === session) {
                 console.error("Live prediction failed:", error);
             }
 
         } finally {
+            if (requestSession !== session) return;
             sending = false;
-            lastSendMs = performance.now();
+            maybeSend();
         }
+    }
+
+    function maybeSend() {
+        if (!active || sending) return;
+        if (frames.length < SEQUENCE_LENGTH) return;
+        if (framesSinceSend < STRIDE) return;
+
+        const sequence = frames.slice(-SEQUENCE_LENGTH);
+        const requestSession = session;
+        framesSinceSend = 0;
+        sending = true;
+
+        // Stringify on a later turn so this detection can paint first.
+        setTimeout(function () {
+            if (!active || requestSession !== session) return;
+            sendPrediction(sequence, requestSession);
+        }, 0);
     }
 
     function processFrame(results, leftHand, rightHand) {
@@ -132,20 +232,14 @@
 
         /* Always keep the latest window — do not stall collection while HTTP is in flight. */
         frames.push(frame);
+        frameTimes.push(performance.now());
         if (frames.length > SEQUENCE_LENGTH) {
-            frames = frames.slice(frames.length - SEQUENCE_LENGTH);
+            frames.shift();
+            frameTimes.shift();
         }
-
-        if (sending) {
-            return;
-        }
-
-        if (frames.length >= SEQUENCE_LENGTH) {
-            const sequence = frames.slice(0, SEQUENCE_LENGTH);
-            /* Sliding overlap: keep recent frames for a quicker next window */
-            frames = frames.slice(Math.max(0, SEQUENCE_LENGTH - KEEP_AFTER_SEND));
-            sendPrediction(sequence);
-        }
+        framesSinceSend++;
+        reportRate();
+        maybeSend();
     }
 
     function status() {
@@ -153,7 +247,11 @@
             active,
             sending,
             collectedFrames: frames.length,
-            lastSendMs
+            framesSinceSend: framesSinceSend,
+            pendingLabel: pendingLabel,
+            pendingCount: pendingCount,
+            windowSpanMs: Math.round(windowSpanMs()),
+            signFramesPerSecond: Number(signFramesPerSecond().toFixed(1))
         };
     }
 

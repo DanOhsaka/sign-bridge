@@ -9,12 +9,12 @@
      Inference canvas (overlay stays full-res)
            │
            ▼ requestVideoFrameCallback + busy gate + watchdog
-     Holistic Landmarker in Web Worker (default for Live LSTM;
-     HandLandmarker if ?holistic=0
-     or while training records — pose needed for LSTM)
+     Pose Lite + Hand Landmarker in Web Worker (Translate page / LSTM;
+     Hand Landmarker alone on Practice, or ?pose=0;
+     pose is always on while training records — LSTM needs it)
            │
            ├── left/right hand landmarks ──► UI (always) + classify (½)
-           ├── pose (Holistic only) ──► LSTM (½ rate)
+           ├── pose (pose mode only) ──► LSTM (½ rate)
            │
            └── adaptive One Euro + age-based prediction
                               └── requestAnimationFrame overlay
@@ -46,8 +46,8 @@ SB.LiveEngine = function () {
   var stream = null;
   var preferGpu = true;
   var forceCpu = false;
-  var forceHolistic = false;
-  var modelKind = "hands"; /* "hands" | "holistic" */
+  var queryPose = null;     /* ?pose=1 → true, ?pose=0 → false, absent → null */
+  var modelKind = "hands"; /* "hands" | "pose" (Pose Lite + Hand Landmarker) */
   var heavyFrame = 0;      /* odd frames skip classify/LSTM */
   var showDebugTrack = false;
 
@@ -77,11 +77,14 @@ SB.LiveEngine = function () {
     var q = (typeof location !== "undefined" && location.search) || "";
     showDebugTrack = /(?:^|[?&])debugTrack=1(?:&|$)/.test(q);
     forceCpu = /(?:^|[?&])forceCpu=1(?:&|$)/.test(q);
-    /* Live defaults to Holistic so LSTM (/api/predict) gets pose+hands.
-       Opt out with ?holistic=0; keep ?holistic=1 as an explicit force-on. */
-    forceHolistic = !/(?:^|[?&])holistic=0(?:&|$)/.test(q);
+    /* The LSTM needs pose + hands, so the Translate page runs Pose Lite +
+       Hand Landmarker. Other pages (Practice letter drills) only need hands
+       and use the faster hand-only model. Override with ?pose=1 / ?pose=0
+       (legacy ?holistic=0/1 is treated the same). */
+    if (/(?:^|[?&])(?:pose|holistic)=0(?:&|$)/.test(q)) queryPose = false;
+    else if (/(?:^|[?&])(?:pose|holistic)=1(?:&|$)/.test(q)) queryPose = true;
   } catch (e) {}
-  modelKind = forceHolistic ? "holistic" : "hands";
+  modelKind = desiredModel();
 
   function queryWantsPerfHud() {
     try {
@@ -265,21 +268,20 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
 
   function desiredModel() {
-    if (forceHolistic) return "holistic";
-    try {
-      if (/(?:^|[?&])holistic=0(?:&|$)/.test(
-            (typeof location !== "undefined" && location.search) || "")) {
-        return "hands";
-      }
-    } catch (e0) {}
+    if (queryPose === true) return "pose";
+    if (queryPose === false) return "hands";
     try {
       if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function" &&
           SB.DataCapture.isRecording()) {
-        return "holistic";
+        return "pose";
       }
     } catch (e) {}
-    /* Default Live path: Holistic for LSTM phrase recognition */
-    return "holistic";
+    /* Translate page: pose + hands for the LSTM. Everything else: hands only. */
+    try {
+      var view = document.body && document.body.getAttribute("data-view");
+      if (view === "translate") return "pose";
+    } catch (e2) {}
+    return "hands";
   }
 
   function applyInferCap() {
@@ -289,7 +291,7 @@ SB.LiveEngine = function () {
 
   function loadLandmarker() {
     modelKind = desiredModel();
-    console.log("Loading MediaPipe " + (modelKind === "holistic" ? "Holistic" : "Hand") + "Landmarker…");
+    console.log("Loading MediaPipe " + (modelKind === "pose" ? "Pose Lite + Hand" : "Hand") + " Landmarker…");
     preferGpu = !forceCpu;
     applyInferCap();
     return initWorker()
@@ -315,7 +317,7 @@ SB.LiveEngine = function () {
     return new Promise(function (resolve, reject) {
       try {
         /* Classic worker: MediaPipe WASM uses importScripts (blocked in module workers). */
-        worker = new Worker("js/engine/handWorker.js?v=20261026p8");
+        worker = new Worker(((window.SB && SB.root) || "") + "js/engine/handWorker.js?v=20261117pose");
       } catch (err) {
         reject(err);
         return;
@@ -533,52 +535,86 @@ SB.LiveEngine = function () {
     ).then(async function (visionModule) {
       var FilesetResolver = visionModule.FilesetResolver;
       var HandLandmarker = visionModule.HandLandmarker;
-      var HolisticLandmarker = visionModule.HolisticLandmarker;
+      var PoseLandmarker = visionModule.PoseLandmarker;
 
       var vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
       );
 
-      var useH = modelKind === "holistic";
-      var opts = useH
-        ? {
-            baseOptions: {
-              modelAssetPath:
-                "https://storage.googleapis.com/mediapipe-models/" +
-                "holistic_landmarker/holistic_landmarker/float16/1/" +
-                "holistic_landmarker.task",
-              delegate: forceCpu ? "CPU" : "GPU",
-            },
-            runningMode: "VIDEO",
-            outputFaceBlendshapes: false,
-            outputPoseSegmentationMasks: false,
-          }
-        : {
-            baseOptions: {
-              modelAssetPath:
-                "https://storage.googleapis.com/mediapipe-models/" +
-                "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-              delegate: forceCpu ? "CPU" : "GPU",
-            },
-            runningMode: "VIDEO",
-            numHands: 2,
-            minHandDetectionConfidence: 0.45,
-            minHandPresenceConfidence: 0.45,
-            minTrackingConfidence: 0.45,
-          };
+      var wantPose = modelKind === "pose";
+      var poseModel =
+        "https://storage.googleapis.com/mediapipe-models/" +
+        "pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task";
+      var handModel =
+        "https://storage.googleapis.com/mediapipe-models/" +
+        "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task";
 
-      var Factory = useH ? HolisticLandmarker : HandLandmarker;
+      async function createPair(delegate) {
+        /* Pose mode (LSTM): thresholds the training frames used.
+           Hands mode (letter drills): the stricter fast-tracking set. */
+        var pose = null;
+        if (wantPose) {
+          pose = await PoseLandmarker.createFromOptions(vision, {
+            baseOptions: { modelAssetPath: poseModel, delegate: delegate },
+            runningMode: "VIDEO",
+            numPoses: 1,
+            minPoseDetectionConfidence: 0.4,
+            minPosePresenceConfidence: 0.4,
+            minTrackingConfidence: 0.4,
+          });
+        }
+        var hands = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: handModel, delegate: delegate },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: wantPose ? 0.3 : 0.55,
+          minHandPresenceConfidence: wantPose ? 0.3 : 0.5,
+          minTrackingConfidence: wantPose ? 0.3 : 0.4,
+        });
+        return { pose: pose, hands: hands };
+      }
+
+      var delegate = forceCpu ? "CPU" : "GPU";
+      var pair;
       try {
-        landmarker = await Factory.createFromOptions(vision, opts);
-        preferGpu = opts.baseOptions.delegate === "GPU";
-        stats.backend = "main/" + opts.baseOptions.delegate + "/" + modelKind;
+        pair = await createPair(delegate);
+        preferGpu = delegate === "GPU";
+        stats.backend = "main/" + delegate + "/" + modelKind;
       } catch (gpuErr) {
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
-        opts.baseOptions.delegate = "CPU";
-        landmarker = await Factory.createFromOptions(vision, opts);
+        pair = await createPair("CPU");
         preferGpu = false;
         stats.backend = "main/CPU/" + modelKind;
       }
+
+      /* Pose mode returns the left / right / pose shape normalizeMainResults()
+         expects; hands mode returns the raw HandLandmarker result. */
+      landmarker = {
+        detectForVideo: function (image, timestamp) {
+          if (!pair.pose) return pair.hands.detectForVideo(image, timestamp);
+          var pose = pair.pose.detectForVideo(image, timestamp);
+          var hands = pair.hands.detectForVideo(image, timestamp);
+          var left = null;
+          var right = null;
+          var lms = hands.landmarks || [];
+          var handed = hands.handedness || hands.handednesses || [];
+          for (var i = 0; i < lms.length; i++) {
+            var top = handed[i] && handed[i][0];
+            var name = top ? (top.categoryName || top.displayName || "") : "";
+            if (name === "Right" && !right) right = lms[i];
+            else if (name === "Left" && !left) left = lms[i];
+          }
+          return {
+            leftHandLandmarks: left ? [left] : [],
+            rightHandLandmarks: right ? [right] : [],
+            poseLandmarks: pose.landmarks || [],
+          };
+        },
+        close: function () {
+          try { if (pair.pose) pair.pose.close(); } catch (e) {}
+          try { pair.hands.close(); } catch (e) {}
+        },
+      };
       applyInferCap();
       stats.model = modelKind;
       console.log("MediaPipe ready (" + stats.backend + ").");
@@ -586,7 +622,7 @@ SB.LiveEngine = function () {
   }
 
   function normalizeMainResults(results) {
-    if (modelKind === "holistic") {
+    if (modelKind === "pose") {
       var detsH = SB.detectionsFromGroups(
         results.leftHandLandmarks,
         results.rightHandLandmarks
@@ -740,6 +776,10 @@ SB.LiveEngine = function () {
 
     return loadPromise
       .then(function () {
+        /* Phone pages: portrait front camera (SB.Device, js/device.js). */
+        if (window.SB && SB.Device && SB.Device.isMobile) {
+          return navigator.mediaDevices.getUserMedia(SB.Device.cameraConstraints());
+        }
         return navigator.mediaDevices.getUserMedia({
           video: {
             /* Pass 8: smallest practical capture for min downscale/infer cost */
@@ -1198,7 +1238,7 @@ SB.LiveEngine = function () {
         recording = !!(stRec && stRec.recording);
       }
     } catch (e) {}
-    var wantLstm = modelKind === "holistic" &&
+    var wantLstm = modelKind === "pose" &&
       window.SignBridgeLiveTest &&
       typeof window.SignBridgeLiveTest.processFrame === "function" &&
       window.SignBridgeLiveTest.status &&
