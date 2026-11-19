@@ -1,22 +1,33 @@
 /* ============================================================
    SignBridge — Transcript renderer (transcript.js)
    ------------------------------------------------------------
-   The transcript is the heart of the learning loop: it shows
-   WHAT the machine understood, and HOW sure it was.
+   Streaming sentence UX: words append into ONE continuous
+   paragraph (like a generating sentence), not a vertical queue
+   of per-word timestamped cards.
 
-   Teaching design baked in here:
-     • confidence is visible on every word (coloured underline) —
-       learners watch the recognizer "hesitate" on hard signs
-     • low-confidence words unfold their alternates inline, and
-       clicking one replaces the word — learners experience that
-       recognition is probabilistic and confirmation matters
-     • every utterance keeps its source badge (Demo/Live) so the
-       prototype's honesty is built in
-     • the panel is aria-live so screen readers announce signing
-       sessions (accessibility for the hearing side too)
+   Teaching design kept:
+     • confidence is visible on every word (coloured underline)
+     • low-confidence words unfold alternates inline
+     • source badge (Live) shown once for the stream
+     • optional per-word timestamps + live-word pulse
+     • aria-live so screen readers announce signing
    ============================================================ */
 
 window.SB = window.SB || {};
+
+SB._TX_EMPTY_HTML =
+  '<div class="empty tx-empty">' +
+  '<div class="empty-title">Waiting for signs</div>' +
+  '<div class="empty-hint" id="txEmptyHint">Words stream here as one growing sentence when Live recognition is confident.</div>' +
+  "</div>";
+
+function SB_formatClock(d) {
+  var h = d.getHours();
+  var m = d.getMinutes();
+  var s = d.getSeconds();
+  var pad = function (n) { return n < 10 ? "0" + n : String(n); };
+  return pad(h) + ":" + pad(m) + ":" + pad(s);
+}
 
 /* Transcript manages one <div class="transcript"> container. */
 SB.Transcript = function (container, opts) {
@@ -24,61 +35,125 @@ SB.Transcript = function (container, opts) {
   var el = container;
   var self = this;
 
-  /* current open utterance being streamed into */
-  var openBubble = null;
+  /* single streaming sentence surface */
+  var stream = null;
+  var sentence = null;
+  var sourceEl = null;
+  var pendingBreak = false;
+  var lastWordEl = null;
+  var startedAt = null;
 
-  function bubbleFor(tok) {
-    if (!openBubble) {
-      openBubble = document.createElement("div");
-      openBubble.className = "bubble is-" + (tok.source || "demo");
-
-      var now = new Date();
-      var head = document.createElement("div");
-      head.className = "bubble-head";
-      head.innerHTML =
-        '<span class="bubble-time">' +
-        String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0") +
-        "</span>" +
-        '<span class="bubble-src src-' + (tok.source || "demo") + '">' + (tok.source === "live" ? "● Live" : "● Demo") + "</span>";
-
-      var actions = document.createElement("div");
-      actions.className = "bubble-actions";
-      var speakBtn = document.createElement("button");
-      speakBtn.title = "Speak this out loud";
-      speakBtn.textContent = "🔊";
-      speakBtn.addEventListener("click", function () { SB.speak(self.bubbleText(openBubble)); });
-      var copyBtn = document.createElement("button");
-      copyBtn.title = "Copy this utterance";
-      copyBtn.textContent = "⧉";
-      copyBtn.addEventListener("click", function () { SB.copyText(self.bubbleText(openBubble)); });
-      actions.appendChild(speakBtn);
-      actions.appendChild(copyBtn);
-      head.appendChild(actions);
-
-      var words = document.createElement("div");
-      words.className = "bubble-words";
-      head.after(words);
-
-      openBubble.appendChild(head);
-      openBubble.appendChild(words);
-      el.appendChild(openBubble);
-      openBubble.scrollIntoView({ block: "end", behavior: "smooth" });
+  function setWorkspaceStatus(mode, live) {
+    var status = document.getElementById("txStatus");
+    var dot = document.getElementById("txLiveDot");
+    if (status) {
+      status.textContent = mode || "Idle";
+      status.classList.toggle("is-live", !!live);
+      status.classList.toggle("is-active", mode === "Streaming" || mode === "Live");
     }
-    return openBubble;
+    if (dot) {
+      dot.classList.toggle("is-on", !!live || mode === "Streaming");
+    }
   }
 
-  /* one recognised token → one animated word */
+  function updateCurrentSign(tok) {
+    var word = document.getElementById("txCurrentWord");
+    var conf = document.getElementById("txCurrentConf");
+    var time = document.getElementById("txCurrentTime");
+    var panel = document.getElementById("txCurrent");
+    if (!word) return;
+    if (!tok || !tok.text) {
+      word.textContent = "—";
+      word.className = "tx-current-word";
+      if (conf) conf.textContent = "";
+      if (time) time.textContent = "";
+      if (panel) panel.classList.remove("has-sign");
+      return;
+    }
+    var label = (tok.glyph ? tok.glyph + " " : "") + tok.text;
+    word.textContent = label;
+    word.className = "tx-current-word " + SB.confClass(tok.conf);
+    if (conf) conf.textContent = SB.confPct(tok.conf);
+    if (time) time.textContent = SB_formatClock(new Date());
+    if (panel) panel.classList.add("has-sign");
+  }
+
+  function ensureStream(tok) {
+    if (!stream) {
+      el.innerHTML = "";
+      stream = document.createElement("div");
+      stream.className = "transcript-stream";
+
+      var meta = document.createElement("div");
+      meta.className = "stream-meta";
+      sourceEl = document.createElement("span");
+      sourceEl.className = "stream-src src-" + (tok.source || "live");
+      sourceEl.textContent = "● Live";
+      meta.appendChild(sourceEl);
+
+      var hint = document.createElement("span");
+      hint.className = "stream-hint";
+      hint.innerHTML = '<span class="live-word-pip" aria-hidden="true"></span> streaming';
+      meta.appendChild(hint);
+
+      if (!startedAt) startedAt = new Date();
+      var clock = document.createElement("span");
+      clock.className = "stream-clock";
+      clock.textContent = "Started " + SB_formatClock(startedAt);
+      meta.appendChild(clock);
+
+      sentence = document.createElement("p");
+      sentence.className = "stream-sentence is-streaming";
+      sentence.setAttribute("aria-live", "polite");
+
+      stream.appendChild(meta);
+      stream.appendChild(sentence);
+      el.appendChild(stream);
+      setWorkspaceStatus("Streaming", tok.source === "live" || tok.source === "lstm");
+    } else if (sourceEl && tok.source) {
+      sourceEl.className = "stream-src src-" + (tok.source || "live");
+      sourceEl.textContent = "● Live";
+      setWorkspaceStatus(
+        tok.source === "lstm" ? "Live" : "Streaming",
+        true
+      );
+    }
+    return sentence;
+  }
+
+  function appendBreakIfNeeded() {
+    if (!pendingBreak || !sentence || !sentence.childNodes.length) {
+      pendingBreak = false;
+      return;
+    }
+    /* soft sentence break — keep one continuous stream, no new card */
+    var gap = document.createElement("span");
+    gap.className = "sentence-gap";
+    gap.setAttribute("aria-hidden", "true");
+    gap.textContent = " · ";
+    sentence.appendChild(gap);
+    pendingBreak = false;
+  }
+
+  /* one recognised token → one word appended to the growing sentence */
   self.addToken = function (tok) {
-    var empty = SB.$(".empty", el);
-    if (empty) empty.remove();
-    var b = bubbleFor(tok);
-    var wordsBox = b.querySelector(".bubble-words");
+    ensureStream(tok);
+    appendBreakIfNeeded();
+
+    var raw = (tok && tok.text != null) ? String(tok.text) : "";
+    var text = raw.replace(/\s+/g, " ").trim();
+    if (!text) return;
+
+    var now = new Date();
     var span = document.createElement("span");
-    span.className = "word " + SB.confClass(tok.conf);
+    span.className = "word is-live-word " + SB.confClass(tok.conf);
     span.dataset.conf = tok.conf;
-    span.dataset.text = tok.text;
-    span.innerHTML = SB.escHtml(tok.glyph ? tok.glyph + " " : "") + SB.escHtml(tok.text);
-    span.title = "Confidence " + SB.confPct(tok.conf);
+    span.dataset.text = text;
+    span.dataset.ts = String(now.getTime());
+    var label = (tok.glyph ? tok.glyph + " " : "") + text;
+    /* trailing space so words read as a natural sentence */
+    span.appendChild(document.createTextNode(label + " "));
+    span.title = "Confidence " + SB.confPct(tok.conf) + " · " + SB_formatClock(now);
     span.setAttribute("tabindex", "0");
 
     var val = document.createElement("span");
@@ -86,9 +161,23 @@ SB.Transcript = function (container, opts) {
     val.textContent = SB.confPct(tok.conf);
     span.appendChild(val);
 
-    /* low confidence → unfold alternates */
-    if (tok.alt && tok.alt.length && tok.conf < 0.8) {
-      var altRow = document.createElement("div");
+    var ts = document.createElement("span");
+    ts.className = "word-ts";
+    ts.textContent = SB_formatClock(now);
+    span.appendChild(ts);
+
+    if (lastWordEl) lastWordEl.classList.remove("is-live-word");
+    lastWordEl = span;
+
+    /* Live: sentence stream only — never unfold "Did you mean?".
+       Demo may still show alternates for teaching near-misses. */
+    var isLiveTok = tok && String(tok.source || "").indexOf("live") === 0;
+    if (!isLiveTok && tok.alt && tok.alt.length && tok.conf < 0.8) {
+      var wrap = document.createElement("span");
+      wrap.className = "word-wrap";
+      wrap.appendChild(span);
+
+      var altRow = document.createElement("span");
       altRow.className = "word-alts";
       var lbl = document.createElement("span");
       lbl.className = "alt-lbl";
@@ -100,46 +189,101 @@ SB.Transcript = function (container, opts) {
         btn.textContent = a;
         btn.addEventListener("click", function () {
           span.dataset.text = a;
-          span.textContent = a;
-          span.className = "word " + SB.confClass(0.95);
-          span.title = "Confirmed manually";
+          while (span.firstChild) span.removeChild(span.firstChild);
+          span.appendChild(document.createTextNode(a + " "));
+          span.appendChild(val);
+          span.appendChild(ts);
+          span.className = "word is-live-word " + SB.confClass(0.95);
+          span.title = "Confirmed manually · " + SB_formatClock(now);
           altRow.remove();
-          b.classList.add("anim-pop");
+          updateCurrentSign({ text: a, conf: 0.95, glyph: tok.glyph });
         });
         altRow.appendChild(btn);
       });
-      wordsBox.appendChild(span);
-      wordsBox.appendChild(altRow);
+      wrap.appendChild(altRow);
+      sentence.appendChild(wrap);
     } else {
-      wordsBox.appendChild(span);
+      sentence.appendChild(span);
     }
 
-    b.scrollIntoView({ block: "end", behavior: "smooth" });
+    updateCurrentSign(tok);
+
+    /* keep the newest word in view */
+    el.scrollTop = el.scrollHeight;
     if (opts.onToken) opts.onToken(tok);
   };
 
-  /* end the current utterance */
-  self.endUtterance = function () { openBubble = null; };
+  /* mark a soft pause between phrases — does NOT open a new card */
+  self.endUtterance = function () {
+    if (sentence && sentence.querySelector(".word")) pendingBreak = true;
+    if (lastWordEl) lastWordEl.classList.remove("is-live-word");
+  };
 
-  self.bubbleText = function (bubble) {
-    return SB.$$(".word", bubble).map(function (w) { return w.dataset.text || w.textContent; }).join(" ");
+  self.bubbleText = function () {
+    return self.allText();
   };
 
   self.clear = function () {
-    el.innerHTML =
-      '<div class="empty">' +
-      '<div class="empty-icon">🗣️</div>' +
-      '<div class="empty-title">Live transcript</div>' +
-      '<div class="empty-hint">No signs yet. Start the demo or enable Live camera — recognized signs appear here in real time.</div>' +
-      "</div>";
-    openBubble = null;
+    el.innerHTML = SB._TX_EMPTY_HTML;
+    stream = null;
+    sentence = null;
+    sourceEl = null;
+    pendingBreak = false;
+    lastWordEl = null;
+    startedAt = null;
+    updateCurrentSign(null);
+    setWorkspaceStatus("Idle", false);
   };
 
   self.allText = function () {
-    return SB.$$(".bubble", el).map(function (b) { return self.bubbleText(b); }).join("\n");
+    if (!sentence) return "";
+    return SB.$$(".word", sentence)
+      .map(function (w) { return w.dataset.text || w.textContent; })
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  self.downloadText = function (filename) {
+    var text = self.allText();
+    if (!text) return false;
+    var stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    var name = filename || ("signbridge-transcript-" + stamp + ".txt");
+    var header = "SignBridge Live Transcript\n" +
+      "Exported " + new Date().toLocaleString() + "\n" +
+      "----------------------------------------\n\n";
+    var blob = new Blob([header + text + "\n"], { type: "text/plain;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1500);
+    return true;
+  };
+
+  self.setCurrentSign = updateCurrentSign;
+  self.setStatus = setWorkspaceStatus;
+
+  /** Update empty-state copy for Live vs Demo (no-op once tokens exist). */
+  self.setLiveHint = function (hint) {
+    var h = document.getElementById("txEmptyHint");
+    if (!h) {
+      var empty = el.querySelector(".empty-hint");
+      if (empty) h = empty;
+    }
+    if (h && hint) h.innerHTML = hint;
+    var title = el.querySelector(".empty-title");
+    if (title && hint) title.textContent = "Waiting for signs";
   };
 
   self.speakAll = function () { SB.speak(self.allText()); };
+
+  /* initial workspace chrome */
+  setWorkspaceStatus("Idle", false);
+  updateCurrentSign(null);
 };
 
 /* Shared "last sign" spotlight on the translate page */
@@ -159,7 +303,9 @@ SB.Spotlight = function (el) {
       confEl.classList.toggle("is-low", tok.conf < 0.7);
 
       altsEl.innerHTML = "";
-      if (tok.alt && tok.alt.length && tok.conf < 0.8) {
+      /* Live: no "Did you mean?" — Demo teaching near-misses only */
+      var liveSrc = tok && String(tok.source || "").indexOf("live") === 0;
+      if (!liveSrc && tok.alt && tok.alt.length && tok.conf < 0.8) {
         var lbl = document.createElement("span");
         lbl.className = "alt-lbl";
         lbl.textContent = "Did you mean?";

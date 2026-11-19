@@ -19,7 +19,7 @@
 window.SB = window.SB || {};
 
 SB.Engine = (function () {
-  var mode = "demo";            // 'demo' | 'live'
+  var mode = "live";            // Translate is Live-only; Practice still uses SimEngine APIs
   var listeners = { hands: [], status: [], result: [] };
   var sim = null;               // SB.SimEngine (lazy)
   var live = null;              // SB.LiveEngine (lazy)
@@ -44,21 +44,24 @@ SB.Engine = (function () {
 
     setMode: function (m, opts) {
       m = m === "live" ? "live" : "demo";
-      if (m === mode) return Promise.resolve(mode);
-      if (m === "demo" && live) live.stop();
-      mode = m;
-      if (m === "live") {
-        return liveEngine().start(opts).then(function () {
-          emit("status", { mode: "live", level: "ok" });
-          return mode;
-        }).catch(function (err) {
-          mode = "demo"; // roll back on failure (no camera etc.)
-          emit("status", { mode: "demo", level: "error", message: err && err.message });
-          throw err;
-        });
+      if (m === "demo") {
+        if (live) live.stop();
+        mode = "demo";
+        emit("status", { mode: "demo", level: "ok" });
+        return Promise.resolve(mode);
       }
-      emit("status", { mode: "demo", level: "ok" });
-      return Promise.resolve(mode);
+      /* Live: restart when already in live mode but camera was stopped. */
+      var eng = liveEngine();
+      var liveRunning = mode === "live" && eng.getState && eng.getState() !== "off";
+      if (liveRunning) return Promise.resolve(mode);
+      mode = "live";
+      return eng.start(opts).then(function () {
+        emit("status", { mode: "live", level: "ok" });
+        return mode;
+      }).catch(function (err) {
+        emit("status", { mode: "live", level: "error", message: err && err.message });
+        throw err;
+      });
     },
 
     /* ---- events ---- */

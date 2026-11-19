@@ -4,17 +4,21 @@
     // Node proxy on the same origin. The server forwards to the Python model.
     const API_URL = "/api/predict";
     const SEQUENCE_LENGTH = 30;
+    /* Keep overlap so the next window starts sooner after a send. */
+    const KEEP_AFTER_SEND = 12;
 
     let active = false;
     let sending = false;
     let session = 0;
     let frames = [];
     let lastSkipLog = 0;
+    let lastSendMs = 0;
 
     function start() {
         session++;
         frames = [];
         active = true;
+        sending = false;
 
         console.log("SignBridge live LSTM test started");
     }
@@ -22,6 +26,7 @@
     function stop() {
         session++;
         active = false;
+        sending = false;
         frames = [];
 
         console.log("SignBridge live LSTM test stopped");
@@ -31,6 +36,7 @@
 
         const requestSession = session;
         sending = true;
+        const t0 = performance.now();
 
         try {
             const response = await fetch(API_URL, {
@@ -54,6 +60,8 @@
             const result = await response.json();
             if (!active || requestSession !== session) return;
 
+            result.apiMs = performance.now() - t0;
+
             console.log("--------------------------");
             console.log("SignBridge Live Prediction");
             console.log("--------------------------");
@@ -64,6 +72,8 @@
                 "Confidence:",
                 (result.confidence * 100).toFixed(2) + "%"
             );
+
+            console.log("API ms:", result.apiMs.toFixed(0));
 
             console.table(result.probabilities);
 
@@ -80,12 +90,13 @@
 
         } finally {
             sending = false;
+            lastSendMs = performance.now();
         }
     }
 
     function processFrame(results, leftHand, rightHand) {
 
-        if (!active || sending) {
+        if (!active) {
             return;
         }
 
@@ -119,14 +130,20 @@
             return;
         }
 
+        /* Always keep the latest window — do not stall collection while HTTP is in flight. */
         frames.push(frame);
+        if (frames.length > SEQUENCE_LENGTH) {
+            frames = frames.slice(frames.length - SEQUENCE_LENGTH);
+        }
+
+        if (sending) {
+            return;
+        }
 
         if (frames.length >= SEQUENCE_LENGTH) {
-
             const sequence = frames.slice(0, SEQUENCE_LENGTH);
-
-            frames = [];
-
+            /* Sliding overlap: keep recent frames for a quicker next window */
+            frames = frames.slice(Math.max(0, SEQUENCE_LENGTH - KEEP_AFTER_SEND));
             sendPrediction(sequence);
         }
     }
@@ -135,7 +152,8 @@
         return {
             active,
             sending,
-            collectedFrames: frames.length
+            collectedFrames: frames.length,
+            lastSendMs
         };
     }
 
@@ -147,4 +165,3 @@
     };
 
 })();
-

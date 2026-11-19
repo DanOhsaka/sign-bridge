@@ -46,7 +46,7 @@ SB.LETTERS = [
 SB.LETTER_MAP = {};
 SB.LETTERS.forEach(function (e) { SB.LETTER_MAP[e.l] = e; });
 
-/* ---------- Common phrases (Learn + Practice + Translate chips) ---------- */
+/* ---------- Common phrases (Learn + Practice) ---------- */
 SB.PHRASES = [
   { id: "hello",          name: "Hello",            emoji: "👋", cat: "Greetings",  desc: "Flat palm to the forehead, sweep outward and down into neutral space. Face says hello too — a smile does half the work." },
   { id: "good-morning",   name: "Good morning",     emoji: "🌅", cat: "Greetings",  desc: "Good (flat hand on chin, arc forward) + morning (flat palm rests on the other forearm's elbow crease, arm rises like the sun)." },
@@ -158,19 +158,6 @@ SB.DEMO_SENTENCE = [
   { text: "you", conf: 0.99 },
 ];
 
-/* ---------- Quick phrases on the Translate page (1–9 hotkeys) ---------- */
-SB.QUICK_PHRASES = [
-  { id: "hello",        emoji: "👋" },
-  { id: "thank-you",    emoji: "🙏" },
-  { id: "please",       emoji: "🥺" },
-  { id: "sorry",        emoji: "😔" },
-  { id: "yes",          emoji: "✅" },
-  { id: "no",           emoji: "❌" },
-  { id: "help",         emoji: "🆘" },
-  { id: "how-are-you",  emoji: "💬" },
-  { id: "nice-to-meet", emoji: "🤝" },
-];
-
 /* ---------- Etiquette: how to communicate with Deaf / hard-of-hearing people ---------- */
 SB.ETIQUETTE = [
   { title: "Get attention the right way", text: "Wave within their line of sight, or tap gently on the shoulder. Never grab hands or wave directly in the face." },
@@ -189,4 +176,92 @@ SB.ASL_FACTS = [
   { ico: "🌎", text: "<strong>There are hundreds of sign languages.</strong> ASL, BSL, FSL, JSL… a Deaf person from London and one from Chicago don't share a language. This app targets ASL first." },
   { ico: "✍️", text: "<strong>Fingerspelling is for names, places, and new words</strong> — not everyday conversation. It's the tool you use when there's no sign yet, or when you're introducing yourself." },
   { ico: "🏠", text: "<strong>Most Deaf children are born to hearing parents</strong> — which is exactly why student-built tools like this one matter: the learning gap is real, and bridging it changes lives." },
+];
+
+/* ---------- Learn page: real HTTPS resources (open in new tab) ---------- */
+SB.LEARN_RESOURCES = [
+  {
+    tag: "ASL",
+    title: "ASL University (Lifeprint)",
+    blurb: "Free ASL lessons, dictionary videos, and Deaf-culture primers by Dr. Bill Vicars.",
+    url: "https://www.lifeprint.com/",
+    label: "lifeprint.com"
+  },
+  {
+    tag: "ASL",
+    title: "HandSpeak",
+    blurb: "ASL dictionary, tutorials, and Deaf-culture notes for learners and families.",
+    url: "https://www.handspeak.com/",
+    label: "handspeak.com"
+  },
+  {
+    tag: "ASL",
+    title: "NIDCD — American Sign Language",
+    blurb: "U.S. NIH overview of ASL as a full language: structure, acquisition, and myths.",
+    url: "https://www.nidcd.nih.gov/health/american-sign-language",
+    label: "nidcd.nih.gov"
+  },
+  {
+    tag: "Deaf culture",
+    title: "National Deaf Center",
+    blurb: "Evidence-based resources on Deaf education, access, and postsecondary success.",
+    url: "https://www.nationaldeafcenter.org/",
+    label: "nationaldeafcenter.org"
+  },
+  {
+    tag: "Deaf culture",
+    title: "Deaf Library",
+    blurb: "Independent library of links on Deaf history, culture, language, and community.",
+    url: "https://www.deaflibrary.org/",
+    label: "deaflibrary.org"
+  },
+  {
+    tag: "Advocacy",
+    title: "Registry of Interpreters for the Deaf",
+    blurb: "Professional interpreting standards, ethics, and how to work with interpreters.",
+    url: "https://www.rid.org/",
+    label: "rid.org"
+  },
+  {
+    tag: "Disability",
+    title: "WHO — Disability",
+    blurb: "World Health Organization overview of disability, rights, and inclusive health.",
+    url: "https://www.who.int/health-topics/disability",
+    label: "who.int"
+  },
+  {
+    tag: "Disability",
+    title: "World Federation of the Deaf",
+    blurb: "International advocacy for Deaf human rights, sign languages, and access.",
+    url: "https://wfdeaf.org/",
+    label: "wfdeaf.org"
+  },
+  {
+    tag: "Health",
+    title: "ASHA — American Sign Language",
+    blurb: "American Speech-Language-Hearing Association public guide to ASL.",
+    url: "https://www.asha.org/public/hearing/american-sign-language/",
+    label: "asha.org"
+  },
+  {
+    tag: "Health",
+    title: "MedlinePlus — Sign language",
+    blurb: "Consumer health encyclopedia entry on sign language and communication access.",
+    url: "https://medlineplus.gov/ency/article/003999.htm",
+    label: "medlineplus.gov"
+  },
+  {
+    tag: "Learn",
+    title: "Start ASL",
+    blurb: "Structured ASL courses and free lessons for beginners through intermediate.",
+    url: "https://www.startasl.com/",
+    label: "startasl.com"
+  },
+  {
+    tag: "Learn",
+    title: "Signing Savvy",
+    blurb: "Searchable ASL video dictionary used by students, teachers, and interpreters.",
+    url: "https://www.signingsavvy.com/",
+    label: "signingsavvy.com"
+  }
 ];
