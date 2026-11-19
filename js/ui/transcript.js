@@ -35,24 +35,44 @@ SB.Transcript = function (container, opts) {
   var el = container;
   var self = this;
 
-  /* single streaming sentence surface */
-  var stream = null;
-  var sentence = null;
-  var sourceEl = null;
-  var pendingBreak = false;
-  var lastWordEl = null;
-  var startedAt = null;
+  /* current open utterance being streamed into */
+  var openBubble = null;
 
-  function setWorkspaceStatus(mode, live) {
-    var status = document.getElementById("txStatus");
-    var dot = document.getElementById("txLiveDot");
-    if (status) {
-      status.textContent = mode || "Idle";
-      status.classList.toggle("is-live", !!live);
-      status.classList.toggle("is-active", mode === "Streaming" || mode === "Live");
-    }
-    if (dot) {
-      dot.classList.toggle("is-on", !!live || mode === "Streaming");
+  function bubbleFor(tok) {
+    if (!openBubble) {
+      openBubble = document.createElement("div");
+      openBubble.className = "bubble is-" + (tok.source || "demo");
+
+      var now = new Date();
+      var head = document.createElement("div");
+      head.className = "bubble-head";
+      head.innerHTML =
+        '<span class="bubble-time">' +
+        String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0") +
+        "</span>" +
+        '<span class="bubble-src src-' + (tok.source || "demo") + '">' + (tok.source === "live" ? "● Live" : "● Demo") + "</span>";
+
+      var actions = document.createElement("div");
+      actions.className = "bubble-actions";
+      var speakBtn = document.createElement("button");
+      speakBtn.title = "Speak this out loud";
+      speakBtn.textContent = "🔊";
+      speakBtn.addEventListener("click", function () { SB.speak(self.bubbleText(openBubble)); });
+      var copyBtn = document.createElement("button");
+      copyBtn.title = "Copy this utterance";
+      copyBtn.textContent = "⧉";
+      copyBtn.addEventListener("click", function () { SB.copyText(self.bubbleText(openBubble)); });
+      actions.appendChild(speakBtn);
+      actions.appendChild(copyBtn);
+      head.appendChild(actions);
+
+      var words = document.createElement("div");
+      words.className = "bubble-words";
+
+      openBubble.appendChild(head);
+      openBubble.appendChild(words);
+      el.appendChild(openBubble);
+      scrollToLatest();
     }
   }
 
@@ -215,11 +235,8 @@ SB.Transcript = function (container, opts) {
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }
 
-  /* mark a soft pause between phrases — does NOT open a new card */
-  self.endUtterance = function () {
-    if (sentence && sentence.querySelector(".word")) pendingBreak = true;
-    if (lastWordEl) lastWordEl.classList.remove("is-live-word");
-  };
+  /* end the current utterance */
+  self.endUtterance = function () { openBubble = null; };
 
   self.bubbleText = function () {
     return self.allText();
