@@ -8,10 +8,8 @@
            ▼ (adaptive downscale ≤560/480/360)
      Inference canvas (overlay stays full-res)
            │
-           ▼ requestVideoFrameCallback + busy gate + watchdog
-     Holistic Landmarker in Web Worker (default for Live LSTM;
-     HandLandmarker if ?holistic=0
-     or while training records — pose needed for LSTM)
+           ▼ requestVideoFrameCallback + busy gate
+     Pose Landmarker Lite + Hand Landmarker in a Web Worker
            │
            ├── left/right hand landmarks ──► UI (always) + classify (½)
            ├── pose (Holistic only) ──► LSTM (½ rate)
@@ -115,21 +113,17 @@ SB.LiveEngine = function () {
   var rawHands = { left: null, right: null, tMs: 0, mediaMs: 0 };
   var uiHands = { left: null, right: null };
   var prevRaw = { left: null, right: null, tMs: 0 };
-  var debugRawHands = { left: null, right: null }; /* ungated, for debug draw */
-  /* Double-buffered clones so slots never alias shared buffers. */
-  var leftCloneA = [];
-  var leftCloneB = [];
-  var rightCloneA = [];
-  var rightCloneB = [];
-  var leftCloneFlip = false;
-  var rightCloneFlip = false;
 
-  /* Pass 8: minimum lag — tip glue near pass-2, palm still filtered. */
-  var FILTER_OPTS = {
-    minCutoff: 2.6, beta: 1.55, tipMinCutoff: 3.6, tipBeta: 2.55, dCutoff: 1.15,
-  };
-  var leftSlot = new SB.HandTrackSlot("L", FILTER_OPTS);
-  var rightSlot = new SB.HandTrackSlot("R", FILTER_OPTS);
+  var leftFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
+  var rightFilter = new SB.HandLandmarkFilter({ minCutoff: 1.4, beta: 0.6 });
+  /* One missed detect should not erase the skeleton. */
+  var HAND_HOLD_MS = 250;
+  var leftHoldUntil = 0;
+  var rightHoldUntil = 0;
+  var leftUiBuf = [];
+  var rightUiBuf = [];
+  var leftPredBuf = [];
+  var rightPredBuf = [];
   var drawPtsBuf = [];
 
   /* Latency compensation — aggressive lead, hard clamp (no spaghetti). */
@@ -261,7 +255,7 @@ SB.LiveEngine = function () {
   }
 
   // ----------------------------------------------------------
-  // Load HandLandmarker (default) — prefer Web Worker
+  // Load pose + hand landmarkers — prefer Web Worker, fall back to main
   // ----------------------------------------------------------
 
   function desiredModel() {
@@ -288,10 +282,7 @@ SB.LiveEngine = function () {
   }
 
   function loadLandmarker() {
-    modelKind = desiredModel();
-    console.log("Loading MediaPipe " + (modelKind === "holistic" ? "Holistic" : "Hand") + "Landmarker…");
-    preferGpu = !forceCpu;
-    applyInferCap();
+    console.log("Loading MediaPipe pose and hand landmarkers…");
     return initWorker()
       .catch(function (err) {
         console.warn(
@@ -350,7 +341,7 @@ SB.LiveEngine = function () {
           if (msg.info && msg.info.fallback) {
             console.warn("GPU delegate failed, using CPU:", msg.info.fallback);
           }
-          console.log("MediaPipe ready (" + stats.backend + ").");
+          console.log("MediaPipe pose + hand ready (" + stats.backend + ").");
           resolve();
           return;
         }
@@ -527,61 +518,97 @@ SB.LiveEngine = function () {
     }
   }
 
+  function handName(entry) {
+    var top = entry && entry[0];
+    if (!top) return "";
+    return top.categoryName || top.displayName || "";
+  }
+
+  function splitHands(handResults) {
+    var left = null;
+    var right = null;
+    var landmarks = (handResults && handResults.landmarks) || [];
+    var handed = (handResults && handResults.handedness) || [];
+    var i;
+    for (i = 0; i < landmarks.length; i++) {
+      var name = handName(handed[i]);
+      if (name === "Right") {
+        if (!right) right = landmarks[i];
+      } else if (name === "Left") {
+        if (!left) left = landmarks[i];
+      }
+    }
+    return {
+      left: left ? [left] : [],
+      right: right ? [right] : [],
+    };
+  }
+
   function initMainThreadLandmarker() {
     return import(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/+esm"
     ).then(async function (visionModule) {
       var FilesetResolver = visionModule.FilesetResolver;
+      var PoseLandmarker = visionModule.PoseLandmarker;
       var HandLandmarker = visionModule.HandLandmarker;
-      var HolisticLandmarker = visionModule.HolisticLandmarker;
 
       var vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
       );
 
-      var useH = modelKind === "holistic";
-      var opts = useH
-        ? {
-            baseOptions: {
-              modelAssetPath:
-                "https://storage.googleapis.com/mediapipe-models/" +
-                "holistic_landmarker/holistic_landmarker/float16/1/" +
-                "holistic_landmarker.task",
-              delegate: forceCpu ? "CPU" : "GPU",
-            },
-            runningMode: "VIDEO",
-            outputFaceBlendshapes: false,
-            outputPoseSegmentationMasks: false,
-          }
-        : {
-            baseOptions: {
-              modelAssetPath:
-                "https://storage.googleapis.com/mediapipe-models/" +
-                "hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-              delegate: forceCpu ? "CPU" : "GPU",
-            },
-            runningMode: "VIDEO",
-            numHands: 2,
-            minHandDetectionConfidence: 0.45,
-            minHandPresenceConfidence: 0.45,
-            minTrackingConfidence: 0.45,
-          };
+      var poseModel =
+        "https://storage.googleapis.com/mediapipe-models/" +
+        "pose_landmarker/pose_landmarker_lite/float16/1/" +
+        "pose_landmarker_lite.task";
+      var handModel =
+        "https://storage.googleapis.com/mediapipe-models/" +
+        "hand_landmarker/hand_landmarker/float16/1/" +
+        "hand_landmarker.task";
 
-      var Factory = useH ? HolisticLandmarker : HandLandmarker;
+      async function createPair(delegate) {
+        var pose = await PoseLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: poseModel, delegate: delegate },
+          runningMode: "VIDEO",
+          numPoses: 1,
+          minPoseDetectionConfidence: 0.4,
+          minPosePresenceConfidence: 0.4,
+          minTrackingConfidence: 0.4,
+        });
+        var hands = await HandLandmarker.createFromOptions(vision, {
+          baseOptions: { modelAssetPath: handModel, delegate: delegate },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.3,
+          minHandPresenceConfidence: 0.3,
+          minTrackingConfidence: 0.3,
+        });
+        return { pose: pose, hands: hands };
+      }
+
+      var pair;
       try {
-        landmarker = await Factory.createFromOptions(vision, opts);
-        preferGpu = opts.baseOptions.delegate === "GPU";
-        stats.backend = "main/" + opts.baseOptions.delegate + "/" + modelKind;
+        pair = await createPair("GPU");
+        stats.backend = "main/GPU";
       } catch (gpuErr) {
         console.warn("GPU delegate failed, falling back to CPU:", gpuErr);
-        opts.baseOptions.delegate = "CPU";
-        landmarker = await Factory.createFromOptions(vision, opts);
-        preferGpu = false;
-        stats.backend = "main/CPU/" + modelKind;
+        pair = await createPair("CPU");
+        stats.backend = "main/CPU";
       }
-      applyInferCap();
-      stats.model = modelKind;
-      console.log("MediaPipe ready (" + stats.backend + ").");
+
+      landmarker = {
+        detectForVideo: function (image, timestamp) {
+          var pose = pair.pose.detectForVideo(image, timestamp);
+          var hands = pair.hands.detectForVideo(image, timestamp);
+          var split = splitHands(hands);
+          return {
+            leftHandLandmarks: split.left,
+            rightHandLandmarks: split.right,
+            poseLandmarks: pose.landmarks || [],
+          };
+        },
+      };
+
+      console.log("MediaPipe pose + hand ready (" + stats.backend + ").");
     });
   }
 
@@ -771,9 +798,7 @@ SB.LiveEngine = function () {
         lastStatsTick = performance.now();
         startInferenceLoop();
         startRenderLoop();
-        console.log(
-          "Live engine started (" + modelKind + ", latest-frame, decoupled draw)."
-        );
+        console.log("Live engine started (pose lite + hand landmarker).");
         return self;
       })
       .catch(function (err) {
@@ -814,12 +839,10 @@ SB.LiveEngine = function () {
     uiHands.left = uiHands.right = null;
     prevRaw.left = prevRaw.right = null;
     prevRaw.tMs = 0;
-    debugRawHands.left = debugRawHands.right = null;
-    leftSlot.reset();
-    rightSlot.reset();
-    lastAcceptedDetectId = 0;
-    pendingKick = null;
-    pendingKickCount = 0;
+    leftFilter.reset();
+    rightFilter.reset();
+    leftHoldUntil = 0;
+    rightHoldUntil = 0;
     stats.dropped = 0;
     stats.timeouts = 0;
     stats.stale = 0;
@@ -1076,63 +1099,13 @@ SB.LiveEngine = function () {
   // ----------------------------------------------------------
 
   function ingestResults(results, wallMs, mediaMs) {
-    leftCloneFlip = !leftCloneFlip;
-    rightCloneFlip = !rightCloneFlip;
+    /* Left and right were assigned by the detector before this point.
+       The LSTM training frames use these same two arrays. */
+    var left = firstGroup(results.leftHandLandmarks);
+    var right = firstGroup(results.rightHandLandmarks);
 
-    var detections = results.detections;
-    if (!detections || !detections.length) {
-      detections = SB.detectionsFromGroups(
-        results.leftHandLandmarks,
-        results.rightHandLandmarks
-      );
-    }
-
-    /* Clone landmark arrays into flip buffers so slots own stable copies */
-    var cloned = [];
-    for (var di = 0; di < detections.length; di++) {
-      var src = detections[di].landmarks;
-      if (!src || !src.length) continue;
-      var buf = (cloned.length & 1)
-        ? (rightCloneFlip ? rightCloneA : rightCloneB)
-        : (leftCloneFlip ? leftCloneA : leftCloneB);
-      /* Use unique buffers per detection index */
-      if (di === 0) buf = leftCloneFlip ? leftCloneA : leftCloneB;
-      else buf = rightCloneFlip ? rightCloneA : rightCloneB;
-      cloned.push({
-        landmarks: cloneLandmarks(src, buf),
-        label: detections[di].label || "",
-        score: detections[di].score || 0.5,
-      });
-    }
-
-    var assigned = SB.assignHandDetections(cloned, leftSlot, rightSlot);
-    if (assigned.swapsBlocked) stats.swapsBlocked += assigned.swapsBlocked;
-
-    debugRawHands.left = assigned.left;
-    debugRawHands.right = assigned.right;
-
-    var leftUp = leftSlot.update(assigned.left, wallMs);
-    var rightUp = rightSlot.update(assigned.right, wallMs);
-
-    if (leftSlot.debug.gated) stats.gated++;
-    if (rightSlot.debug.gated) stats.gated++;
-    if (leftUp.reacquired || rightUp.reacquired) stats.jumps++;
-    if (leftUp.held) stats.holds++;
-    if (rightUp.held) stats.holds++;
-    if (leftUp.reacquired) stats.reacquires++;
-    if (rightUp.reacquired) stats.reacquires++;
-    stats.losses = leftSlot.lossCount + rightSlot.lossCount;
-    stats.handL = leftSlot.status;
-    stats.handR = rightSlot.status;
-    stats.ageL = leftSlot.lastTMs ? leftSlot.landmarkAgeMs(wallMs) : 0;
-    stats.ageR = rightSlot.lastTMs ? rightSlot.landmarkAgeMs(wallMs) : 0;
-    stats.clearWhy =
-      leftSlot.clearReason || rightSlot.clearReason ||
-      (leftUp.clearReason || "") || (rightUp.clearReason || "") ||
-      stats.clearWhy;
-
-    prevRaw.left = leftSlot.prevRaw;
-    prevRaw.right = rightSlot.prevRaw;
+    prevRaw.left = rawHands.left;
+    prevRaw.right = rawHands.right;
     prevRaw.tMs = rawHands.tMs;
 
     /* Accepted = live raw; brief TEMPORARILY_LOST hold keeps last raw for draw
@@ -1146,9 +1119,7 @@ SB.LiveEngine = function () {
     rawHands.tMs = wallMs;
     rawHands.mediaMs = mediaMs;
 
-    uiHands.left = leftUp.ui;
-    uiHands.right = rightUp.ui;
-
+    updateUiFromRaw(wallMs);
     var handCount = (uiHands.left ? 1 : 0) + (uiHands.right ? 1 : 0);
     stats.hands = handCount;
     if (SB.Engine && SB.Engine._hands) SB.Engine._hands(handCount);
@@ -1183,7 +1154,16 @@ SB.LiveEngine = function () {
       }
     }
 
-    if (!runHeavy) return;
+    // Forward every detected frame to training and LSTM consumers,
+    // independently of the optional single-hand classifier.
+    if (window.TrainingRecorder &&
+        typeof window.TrainingRecorder.processFrame === "function") {
+      try {
+        window.TrainingRecorder.processFrame(results, left, right);
+      } catch (err) {
+        console.error("Training recorder error:", err);
+      }
+    }
 
     /* Hands mode has no pose — skip LSTM entirely (needs shoulders).
        Training only while actively recording. */
@@ -1244,6 +1224,26 @@ SB.LiveEngine = function () {
     }
     out.length = src.length;
     return out;
+  }
+
+  function updateUiFromRaw(wallMs) {
+    var tSec = wallMs / 1000;
+    if (rawHands.left) {
+      leftHoldUntil = wallMs + HAND_HOLD_MS;
+      uiHands.left = leftFilter.apply(tSec, rawHands.left, leftUiBuf);
+    } else if (!(uiHands.left && wallMs < leftHoldUntil)) {
+      leftFilter.reset();
+      uiHands.left = null;
+      leftHoldUntil = 0;
+    }
+    if (rawHands.right) {
+      rightHoldUntil = wallMs + HAND_HOLD_MS;
+      uiHands.right = rightFilter.apply(tSec, rawHands.right, rightUiBuf);
+    } else if (!(uiHands.right && wallMs < rightHoldUntil)) {
+      rightFilter.reset();
+      uiHands.right = null;
+      rightHoldUntil = 0;
+    }
   }
 
   // ----------------------------------------------------------

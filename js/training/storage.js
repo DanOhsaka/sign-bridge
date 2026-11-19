@@ -1,42 +1,35 @@
 // training/storage.js
+// Posts a finished recording to the local Node server, which
+// writes training-data/<LABEL>/<LABEL>_NNN.json.
 
 (function () {
 
   function saveTrainingSample(sample) {
 
-    var json = JSON.stringify(sample, null, 2);
+    fetch("/api/training/sample", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(sample)
+    }).then(function (response) {
+      return response.json().then(function (body) {
+        if (!response.ok) {
+          throw new Error(
+            (body && body.message) || "Save failed."
+          );
+        }
 
-    var blob = new Blob(
-      [json],
-      { type: "application/json" }
-    );
-
-    var url = URL.createObjectURL(blob);
-
-    var link = document.createElement("a");
-
-    var safeLabel = sample.label
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g, "_");
-
-    var timestamp = Date.now();
-
-    link.href = url;
-
-    link.download =
-      safeLabel +
-      "_" +
-      timestamp +
-      ".json";
-
-    document.body.appendChild(link);
-
-    link.click();
-
-    document.body.removeChild(link);
-
-    URL.revokeObjectURL(url);
+        console.log(
+          "Saved training sample:",
+          body.path
+        );
+      });
+    }).catch(function (err) {
+      console.error(
+        "Could not save the training sample into training-data.",
+        "The app has to be running with node server/index.js.",
+        err
+      );
+    });
   }
 
   window.saveTrainingSample =
