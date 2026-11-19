@@ -75,6 +75,7 @@
         session++;
         resetSequence();
         active = true;
+        sending = false;
 
         console.log("SignBridge live LSTM test started");
     }
@@ -215,6 +216,7 @@
             return;
         }
 
+        /* Always keep the latest window — do not stall collection while HTTP is in flight. */
         frames.push(frame);
         frameTimes.push(performance.now());
         if (frames.length > SEQUENCE_LENGTH) {

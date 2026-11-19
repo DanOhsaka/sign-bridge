@@ -16,7 +16,7 @@ SB.PracticeView = function () {
   });
 
   var state = {
-    tab: "letters",
+    tab: "signs", /* signs | assess */
     target: null,
     sessionCorrect: 0,
     sessionTried: 0,
@@ -24,18 +24,40 @@ SB.PracticeView = function () {
     nextTimer: null,
   };
 
+  var signFilter = { q: "", cat: "All" };
+  var cameraOn = false;
+  var liveStarting = false;
+  var liveListenersBound = false;
+
+  /* Clip capture: landmark feature buffer + optional MediaRecorder video */
+  var recording = false;
+  var clipReady = false;
+  var clipFeats = []; /* Float32Array[] while recording / after stop */
+  var clipVotes = []; /* {text,conf}[] live previews while recording */
+  var mediaRecorder = null;
+  var recChunks = [];
+  var clipBlobUrl = null;
+  var recStartedAt = 0;
+  var recTimerId = null;
+
+  function live() { return SB.Engine.getLiveEngine(); }
+
   function save() { SB.store.set("progress", progress); }
 
   function init() {
+    SB.PracticeView._instance = api;
     bindTabs();
+    bindSignBrowser();
+    bindLiveCamera();
     pickTarget();
     bindPad();
     bindKeyboard();
     bindReview();
-    bindPhraseDeck();
     renderMinipairs();
     resetFeedbackIdle();
     updateStats();
+    /* Start Live when Assess is already selected (e.g. deep link). */
+    if (state.tab === "assess") goLive();
   }
 
   function renderMinipairs() {
@@ -51,15 +73,597 @@ SB.PracticeView = function () {
     });
   }
 
+  function showTab(tab) {
+    tab = tab === "assess" ? "assess" : "signs";
+    state.tab = tab;
+    SB.$$("#practiceTabs button").forEach(function (b) {
+      b.classList.toggle("is-on", b.dataset.tab === tab);
+    });
+    var signs = SB.$("#signsPane");
+    var assess = SB.$("#assessPane");
+    if (signs) signs.style.display = tab === "signs" ? "" : "none";
+    if (assess) assess.style.display = tab === "assess" ? "" : "none";
+    if (tab === "assess") {
+      goLive();
+    } else {
+      stopCamera({ silent: true });
+    }
+  }
+
   function bindTabs() {
     SB.$$("#practiceTabs button").forEach(function (btn) {
       btn.addEventListener("click", function () {
-        SB.$$("#practiceTabs button").forEach(function (b) { b.classList.remove("is-on"); });
-        btn.classList.add("is-on");
-        state.tab = btn.dataset.tab;
-        SB.$("#lettersPane").style.display = state.tab === "letters" ? "" : "none";
-        SB.$("#phrasesPane").style.display = state.tab === "phrases" ? "" : "none";
+        showTab(btn.dataset.tab);
       });
+    });
+  }
+
+  /* ---------- Live camera (reuse Translate engine + waiting UI) ---------- */
+  function setStageOverlay(kind, title, detail) {
+    var stage = SB.$("#stage");
+    var overlay = SB.$("#stageOverlay");
+    if (!stage) return;
+    stage.classList.remove("is-starting", "is-error", "is-waiting");
+    if (!kind) {
+      if (overlay) overlay.hidden = true;
+      return;
+    }
+    var klass = kind === "error" ? "is-error"
+      : kind === "waiting" ? "is-waiting"
+      : "is-starting";
+    stage.classList.add(klass);
+    if (!overlay) return;
+    overlay.hidden = false;
+    overlay.dataset.kind = kind;
+    var titleEl = SB.$(".overlay-title", overlay);
+    var detailEl = SB.$(".overlay-detail", overlay);
+    var spin = SB.$(".spinner", overlay);
+    var waitFx = SB.$(".stage-wait-fx", overlay);
+    if (titleEl) titleEl.textContent = title || "";
+    if (detailEl) {
+      detailEl.textContent = detail || "";
+      detailEl.hidden = !detail;
+    }
+    if (spin) spin.style.display = kind === "starting" ? "" : "none";
+    if (waitFx) waitFx.style.display = kind === "waiting" ? "" : "none";
+  }
+
+  function syncCameraChip() {
+    var camChip = SB.$("#cameraToggle");
+    if (!camChip) return;
+    camChip.classList.toggle("is-on", !!cameraOn);
+    camChip.setAttribute("aria-pressed", cameraOn ? "true" : "false");
+  }
+
+  function highlightLivePad(letter) {
+    SB.$$("#letterPad button").forEach(function (b) {
+      b.classList.toggle("is-live", !!letter && b.dataset.l === letter);
+    });
+  }
+
+  function normalizeLiveLetter(text) {
+    var t = String(text || "").trim().toUpperCase();
+    return /^[A-Z]$/.test(t) ? t : null;
+  }
+
+  function attachLetterClassifier() {
+    var eng = live();
+    if (SB.LetterClassifier && typeof SB.LetterClassifier.classify === "function") {
+      /* Buffer landmarks while recording; never auto-score via Engine._result. */
+      eng.setClassifier(function (feats) {
+        var tok = null;
+        try { tok = SB.LetterClassifier.classify(feats); } catch (e) { tok = null; }
+        if (recording && feats && feats.length >= 63) {
+          clipFeats.push(Float32Array.from(feats));
+          var letter = tok && normalizeLiveLetter(tok.text);
+          if (letter) {
+            clipVotes.push({ text: letter, conf: typeof tok.conf === "number" ? tok.conf : 0 });
+            highlightLivePad(letter);
+          }
+        }
+        return null;
+      });
+      eng._classifierKind = "letter-clip";
+      return true;
+    }
+    eng.setClassifier(null);
+    eng._classifierKind = null;
+    return false;
+  }
+
+  function revokeClipUrl() {
+    if (clipBlobUrl) {
+      try { URL.revokeObjectURL(clipBlobUrl); } catch (e) {}
+      clipBlobUrl = null;
+    }
+    var replay = SB.$("#clipReplay");
+    if (replay) {
+      replay.pause();
+      replay.removeAttribute("src");
+      replay.load();
+      replay.hidden = true;
+    }
+    var stage = SB.$("#stage");
+    if (stage) stage.classList.remove("is-replay");
+  }
+
+  function clearClip() {
+    if (recording) {
+      recording = false;
+      if (recTimerId) {
+        clearInterval(recTimerId);
+        recTimerId = null;
+      }
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        try {
+          mediaRecorder.ondataavailable = null;
+          mediaRecorder.onstop = null;
+          mediaRecorder.stop();
+        } catch (e) {}
+      }
+      mediaRecorder = null;
+    }
+    clipFeats = [];
+    clipVotes = [];
+    clipReady = false;
+    recChunks = [];
+    revokeClipUrl();
+    highlightLivePad(null);
+    syncRecUi();
+    resetFeedbackIdle();
+  }
+
+  function syncRecUi() {
+    var startBtn = SB.$("#recStartBtn");
+    var stopBtn = SB.$("#recStopBtn");
+    var clearBtn = SB.$("#recClearBtn");
+    var badge = SB.$("#recBadge");
+    var meta = SB.$("#clipMeta");
+    var stage = SB.$("#stage");
+    if (startBtn) startBtn.disabled = !cameraOn || recording || state.locked;
+    if (stopBtn) stopBtn.disabled = !recording;
+    if (clearBtn) clearBtn.disabled = recording || (!clipReady && !clipFeats.length);
+    if (badge) badge.hidden = !recording;
+    if (stage) stage.classList.toggle("is-recording", !!recording);
+    if (!meta) return;
+    if (!cameraOn) {
+      meta.textContent = "Turn Camera on to record a signing clip.";
+    } else if (recording) {
+      meta.textContent = "Recording… keep the target handshape steady. Live preview on the pad.";
+    } else if (clipReady) {
+      meta.textContent = "Clip ready (" + clipFeats.length + " landmark frames). Pick a letter on the pad or keyboard to grade.";
+    } else if (clipBlobUrl) {
+      meta.textContent = "Video preview saved, but no hand landmarks — record again with your hand in frame.";
+    } else {
+      meta.textContent = "Camera on → Record → Stop → pick a letter to grade.";
+    }
+  }
+
+  function tickRecTimer() {
+    var el = SB.$("#recTimer");
+    if (!el || !recording) return;
+    var sec = (performance.now() - recStartedAt) / 1000;
+    el.textContent = sec.toFixed(1) + "s";
+  }
+
+  function pickRecorderMime() {
+    if (typeof MediaRecorder === "undefined") return "";
+    var types = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ];
+    for (var i = 0; i < types.length; i++) {
+      if (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(types[i])) return types[i];
+    }
+    return "";
+  }
+
+  function startRecording() {
+    if (!cameraOn || recording || state.locked || state.tab !== "assess") return;
+    var video = SB.$("#cam");
+    var stream = video && video.srcObject;
+    if (!stream) {
+      SB.toast("Camera stream not ready", "error");
+      return;
+    }
+
+    clipFeats = [];
+    clipVotes = [];
+    clipReady = false;
+    recChunks = [];
+    revokeClipUrl();
+    recording = true;
+    recStartedAt = performance.now();
+    tickRecTimer();
+    if (recTimerId) clearInterval(recTimerId);
+    recTimerId = setInterval(tickRecTimer, 100);
+
+    var mime = pickRecorderMime();
+    try {
+      mediaRecorder = mime
+        ? new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 900000 })
+        : new MediaRecorder(stream);
+      mediaRecorder.ondataavailable = function (ev) {
+        if (ev.data && ev.data.size) recChunks.push(ev.data);
+      };
+      mediaRecorder.onerror = function () {
+        SB.toast("MediaRecorder error — landmark buffer still grades", "info");
+      };
+      mediaRecorder.start(200);
+    } catch (err) {
+      mediaRecorder = null;
+      SB.toast("Video encode unavailable — grading from landmark buffer", "info");
+    }
+
+    syncRecUi();
+    var st = SB.$("#stageStatus");
+    if (st) st.innerHTML = '<span class="dot"></span>Recording clip — sign the target letter.';
+    resetFeedbackIdle();
+    SB.toast("Recording…", "ok");
+  }
+
+  function stopRecording(opts) {
+    opts = opts || {};
+    if (!recording) return;
+    recording = false;
+    if (recTimerId) {
+      clearInterval(recTimerId);
+      recTimerId = null;
+    }
+
+    function finish() {
+      /* Grading needs landmark frames; video alone is preview-only. */
+      clipReady = clipFeats.length > 0;
+      if (recChunks.length) {
+        var blob = new Blob(recChunks, { type: recChunks[0].type || "video/webm" });
+        revokeClipUrl();
+        clipBlobUrl = URL.createObjectURL(blob);
+        var replay = SB.$("#clipReplay");
+        var stage = SB.$("#stage");
+        if (replay && clipBlobUrl) {
+          replay.src = clipBlobUrl;
+          replay.hidden = false;
+          if (stage) stage.classList.add("is-replay");
+          replay.play().catch(function () {});
+        }
+      }
+      syncRecUi();
+      var st = SB.$("#stageStatus");
+      if (st) {
+        st.innerHTML = clipReady
+          ? '<span class="dot"></span>Clip saved — ' + clipFeats.length + ' landmark frames. Pick a letter to grade.'
+          : '<span class="dot"></span>Clip stopped — no hand landmarks captured. Record again with hand in frame.';
+      }
+      resetFeedbackIdle();
+      if (!opts.silent) {
+        SB.toast(
+          clipReady
+            ? "Clip ready — pick a letter to grade"
+            : "No landmarks in clip — try again",
+          clipReady ? "ok" : "error"
+        );
+      }
+    }
+
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.onstop = function () {
+        mediaRecorder = null;
+        finish();
+      };
+      try { mediaRecorder.stop(); } catch (e) {
+        mediaRecorder = null;
+        finish();
+      }
+    } else {
+      mediaRecorder = null;
+      finish();
+    }
+  }
+
+  /**
+   * Majority / confidence-weighted vote over buffered landmark frames.
+   * @returns {{text:string, conf:number, frames:number, votes:number}|null}
+   */
+  function gradeClip() {
+    var tallies = {};
+    var i;
+    /* Re-classify stored features (authoritative) */
+    for (i = 0; i < clipFeats.length; i++) {
+      var tok = null;
+      try {
+        if (SB.LetterClassifier) tok = SB.LetterClassifier.classify(clipFeats[i]);
+      } catch (e) { tok = null; }
+      var letter = tok && normalizeLiveLetter(tok.text);
+      if (!letter) continue;
+      if (!tallies[letter]) tallies[letter] = { n: 0, confSum: 0 };
+      tallies[letter].n++;
+      tallies[letter].confSum += typeof tok.conf === "number" ? tok.conf : 0.6;
+    }
+    /* Fallback to live votes if features somehow empty but votes exist */
+    if (!Object.keys(tallies).length) {
+      for (i = 0; i < clipVotes.length; i++) {
+        var v = clipVotes[i];
+        var L = normalizeLiveLetter(v && v.text);
+        if (!L) continue;
+        if (!tallies[L]) tallies[L] = { n: 0, confSum: 0 };
+        tallies[L].n++;
+        tallies[L].confSum += typeof v.conf === "number" ? v.conf : 0.6;
+      }
+    }
+    var best = null;
+    Object.keys(tallies).forEach(function (L) {
+      var t = tallies[L];
+      var score = t.n + t.confSum / Math.max(1, t.n);
+      if (!best || score > best.score) {
+        best = {
+          text: L,
+          conf: t.confSum / Math.max(1, t.n),
+          frames: clipFeats.length,
+          votes: t.n,
+          score: score,
+        };
+      }
+    });
+    return best;
+  }
+
+  function stopCamera(opts) {
+    opts = opts || {};
+    cameraOn = false;
+    liveStarting = false;
+    clearClip();
+    highlightLivePad(null);
+    syncCameraChip();
+    syncRecUi();
+    try {
+      var eng = live();
+      if (eng.setClassifier) eng.setClassifier(null);
+      eng._classifierKind = null;
+    } catch (e0) {}
+    try {
+      if (live().getState && live().getState() !== "off") live().stop();
+    } catch (e2) {}
+    try { SB.Engine._hands(0); } catch (e3) {}
+    var stage = SB.$("#stage");
+    if (stage) {
+      stage.classList.remove("is-cam", "is-mirror", "is-starting", "is-error", "is-recording", "is-replay");
+    }
+    setStageOverlay(
+      "waiting",
+      "Waiting for camera to be turned on",
+      "Toggle Camera on to record letter signing clips."
+    );
+    var st = SB.$("#stageStatus");
+    if (st) {
+      st.classList.remove("is-hands");
+      st.innerHTML = '<span class="dot"></span>Camera off — turn Camera on to record clips.';
+    }
+    if (!opts.silent) SB.toast("Camera off", "info");
+  }
+
+  function goLive() {
+    if (state.tab !== "assess") return;
+    if (liveStarting) return;
+    cameraOn = true;
+    liveStarting = true;
+    syncCameraChip();
+    clearClip();
+
+    var stage = SB.$("#stage");
+    setStageOverlay("starting", "Starting camera…", "Allow camera access if prompted. Keep your signing hand in frame.");
+    var st = SB.$("#stageStatus");
+    if (st) st.innerHTML = '<span class="dot"></span>Requesting camera permission…';
+    if (SB.resumeThreeFX) SB.resumeThreeFX();
+
+    attachLetterClassifier();
+
+    SB.Engine.setMode("live", {
+      videoEl: SB.$("#cam"),
+      canvasEl: SB.$("#overlay"),
+      mirror: SB.settings.mirror,
+      drawLandmarks: SB.settings.landmarks !== false,
+      showHud: !!(SB.settings && SB.settings.perfHud),
+    }).then(function () {
+      liveStarting = false;
+      if (!cameraOn || state.tab !== "assess") {
+        try { live().stop(); } catch (eStop) {}
+        return;
+      }
+      attachLetterClassifier();
+      setStageOverlay(null);
+      if (stage) {
+        stage.classList.add("is-cam");
+        stage.classList.toggle("is-mirror", !!SB.settings.mirror);
+      }
+      var mir = SB.$("#mirrorToggle");
+      var lm = SB.$("#landmarkToggle");
+      if (mir) mir.classList.toggle("is-on", !!SB.settings.mirror);
+      if (lm) lm.classList.toggle("is-on", SB.settings.landmarks !== false);
+      syncCameraChip();
+      if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks !== false);
+      if (live().setMirror) live().setMirror(!!SB.settings.mirror);
+      if (st) {
+        st.innerHTML = '<span class="dot"></span>Live preview on — press Record, sign the target, then Stop.';
+      }
+      syncRecUi();
+      SB.toast("Live letter cam on — record a clip", "ok");
+    }).catch(function (err) {
+      liveStarting = false;
+      cameraOn = false;
+      syncCameraChip();
+      syncRecUi();
+      setStageOverlay("error", "Camera unavailable",
+        (err && err.message ? err.message : "Permission denied or no camera found.") +
+        " Toggle Camera on after allowing access.");
+      SB.toast(
+        "Live camera unavailable — " +
+          (err && err.message ? err.message : "permission denied") + ".",
+        "error"
+      );
+    });
+  }
+
+  function bindLiveCamera() {
+    if (!SB.$("#stage") || !SB.$("#cameraToggle")) return;
+
+    var lmChip = SB.$("#landmarkToggle");
+    var mirChip = SB.$("#mirrorToggle");
+    if (lmChip) lmChip.classList.toggle("is-on", SB.settings.landmarks !== false);
+    if (mirChip) mirChip.classList.toggle("is-on", !!SB.settings.mirror);
+    syncCameraChip();
+    syncRecUi();
+    setStageOverlay(
+      "waiting",
+      "Waiting for camera to be turned on",
+      "Open Assess and toggle Camera on to record letter clips."
+    );
+
+    if (!liveListenersBound) {
+      liveListenersBound = true;
+      SB.Engine.on("hands", function (count) {
+        if (state.tab !== "assess" || !cameraOn || recording) return;
+        var st = SB.$("#stageStatus");
+        if (!st || clipReady) return;
+        if (count > 0) {
+          st.classList.add("is-hands");
+          st.innerHTML = '<span class="dot"></span>Hand detected — press Record when ready.';
+        } else {
+          st.classList.remove("is-hands");
+          st.innerHTML = '<span class="dot"></span>Move a hand into view, then Record.';
+          highlightLivePad(null);
+        }
+      });
+      window.addEventListener("pagehide", function () {
+        try { if (recording) stopRecording({ silent: true }); } catch (e0) {}
+        try {
+          if (live().getState && live().getState() !== "off") live().stop();
+        } catch (e) {}
+      });
+    }
+
+    var camBtn = SB.$("#cameraToggle");
+    camBtn.addEventListener("click", function () {
+      if (cameraOn || liveStarting) {
+        stopCamera();
+        return;
+      }
+      goLive();
+    });
+
+    var startBtn = SB.$("#recStartBtn");
+    var stopBtn = SB.$("#recStopBtn");
+    var clearBtn = SB.$("#recClearBtn");
+    if (startBtn) startBtn.addEventListener("click", function () { startRecording(); });
+    if (stopBtn) stopBtn.addEventListener("click", function () { stopRecording(); });
+    if (clearBtn) clearBtn.addEventListener("click", function () {
+      clearClip();
+      SB.toast("Clip cleared", "info");
+    });
+
+    var mirrorBtn = SB.$("#mirrorToggle");
+    if (mirrorBtn) {
+      mirrorBtn.addEventListener("click", function () {
+        SB.settings.mirror = !SB.settings.mirror;
+        SB.saveSettings();
+        mirrorBtn.classList.toggle("is-on", SB.settings.mirror);
+        var stage = SB.$("#stage");
+        if (stage) stage.classList.toggle("is-mirror", !!SB.settings.mirror && stage.classList.contains("is-cam"));
+        if (live().setMirror) live().setMirror(SB.settings.mirror);
+        SB.toast("Mirror mode " + (SB.settings.mirror ? "on" : "off"), "info");
+      });
+    }
+
+    var lmBtn = SB.$("#landmarkToggle");
+    if (lmBtn) {
+      lmBtn.addEventListener("click", function () {
+        SB.settings.landmarks = !SB.settings.landmarks;
+        SB.saveSettings();
+        lmBtn.classList.toggle("is-on", SB.settings.landmarks);
+        if (live().setDrawLandmarks) live().setDrawLandmarks(SB.settings.landmarks);
+        SB.toast("Landmark overlay " + (SB.settings.landmarks ? "on" : "off"), "info");
+      });
+    }
+  }
+
+  /* ---------- Sign browser (moved from Learn) ---------- */
+  function bindSignBrowser() {
+    if (!SB.$("#signGrid")) return;
+    buildSignCategories();
+    renderSignGrid();
+    var input = SB.$("#learnSearch");
+    if (input) {
+      input.addEventListener("input", function () {
+        signFilter.q = input.value.trim().toLowerCase();
+        renderSignGrid();
+      });
+    }
+  }
+
+  function buildSignCategories() {
+    var wrap = SB.$("#catChips");
+    if (!wrap) return;
+    var cats = ["All"];
+    (SB.PHRASES || []).forEach(function (p) {
+      if (cats.indexOf(p.cat) === -1) cats.push(p.cat);
+    });
+    wrap.innerHTML = "";
+    cats.forEach(function (c) {
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "chip" + (c === "All" ? " is-on" : "");
+      chip.dataset.cat = c;
+      chip.textContent = c;
+      chip.addEventListener("click", function () {
+        SB.$$("#catChips .chip").forEach(function (x) { x.classList.remove("is-on"); });
+        chip.classList.add("is-on");
+        signFilter.cat = c;
+        renderSignGrid();
+      });
+      wrap.appendChild(chip);
+    });
+  }
+
+  function renderSignGrid() {
+    var grid = SB.$("#signGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    var items = (SB.PHRASES || []).filter(function (p) {
+      var catOk = signFilter.cat === "All" || p.cat === signFilter.cat;
+      var qOk = !signFilter.q ||
+        p.name.toLowerCase().indexOf(signFilter.q) !== -1 ||
+        p.desc.toLowerCase().indexOf(signFilter.q) !== -1 ||
+        p.cat.toLowerCase().indexOf(signFilter.q) !== -1;
+      return catOk && qOk;
+    });
+
+    if (!items.length) {
+      grid.innerHTML =
+        '<div class="empty" style="grid-column:1/-1">' +
+        '<div class="empty-icon">⌕</div>' +
+        '<div class="empty-title">No signs match</div>' +
+        '<div class="empty-hint">Try another search term, or clear the category filter.</div>' +
+        "</div>";
+      return;
+    }
+
+    items.forEach(function (p) {
+      var card = document.createElement("article");
+      card.className = "sign-card anim-rise";
+      card.innerHTML =
+        '<div class="sc-top"><span class="sc-glyph" aria-hidden="true">' + p.emoji + "</span>" +
+        "<h4>" + p.name + "</h4></div>" +
+        '<p class="sc-desc">' + p.desc + "</p>" +
+        '<div class="sc-foot">' +
+        '<span class="badge badge-cat sc-cat">' + p.cat + "</span>" +
+        '<div class="sc-actions"><button type="button" class="btn btn-soft btn-sm" data-show>Practice →</button></div>' +
+        "</div>";
+      card.querySelector("[data-show]").addEventListener("click", function () {
+        showTab("assess");
+        SB.toast("Assess — record \"" + p.name + "\" handshape practice on Live cam", "ok");
+      });
+      grid.appendChild(card);
     });
   }
 
@@ -72,6 +676,8 @@ SB.PracticeView = function () {
 
   function pickTarget() {
     clearNextTimer();
+    clearClip();
+    highlightLivePad(null);
     state.locked = false;
     if (progress.review.length) {
       state.target = progress.review[0];
@@ -83,6 +689,7 @@ SB.PracticeView = function () {
     renderTarget();
     resetFeedbackIdle();
     updateStats();
+    syncRecUi();
   }
 
   function renderTarget() {
@@ -108,7 +715,15 @@ SB.PracticeView = function () {
     var fb = SB.$("#feedback");
     if (!fb) return;
     fb.className = "feedback";
-    fb.innerHTML = "<div><strong>Waiting for your answer…</strong><p>Press the matching letter on your keyboard, or tap the pad below.</p></div>";
+    if (recording) {
+      fb.innerHTML = "<div><strong>Recording…</strong><p>Hold the target handshape steady. The pad previews live reads — press <strong>Stop</strong> when done.</p></div>";
+    } else if (clipReady && clipFeats.length) {
+      fb.innerHTML = "<div><strong>Clip ready — pick a letter</strong><p>Tap the pad or press a key. We grade accuracy from the recorded landmark clip (not live).</p></div>";
+    } else if (cameraOn) {
+      fb.innerHTML = "<div><strong>Waiting for a clip…</strong><p>Press <strong>Record</strong>, sign the target, then <strong>Stop</strong>. Pick a letter to grade the clip.</p></div>";
+    } else {
+      fb.innerHTML = "<div><strong>Camera off</strong><p>Turn Camera on to record a signing clip, or use the pad without a clip for simulated drills.</p></div>";
+    }
   }
 
   function showFeedback(kind, html) {
@@ -126,80 +741,140 @@ SB.PracticeView = function () {
     setTimeout(function () { el.classList.remove("is-bump"); }, 240);
   }
 
-  function sign(letter) {
-    if (state.locked || state.tab !== "letters") return;
+  function applyGuess(tok) {
+    var got = String(tok.text || "").toUpperCase();
+    var pick = tok.pick ? String(tok.pick).toUpperCase() : got;
     var target = state.target;
+    var padBtn = SB.$('#letterPad button[data-l="' + pick + '"]');
+    var gotBtn = SB.$('#letterPad button[data-l="' + got + '"]');
+    var arena = SB.$("#arenaTarget");
+    var fromClip = tok.source === "clip";
+    var detail = fromClip
+      ? ("Clip graded <strong>" + got + "</strong> at " + SB.confPct(tok.conf) +
+        " (" + (tok.frames || 0) + " landmark frames, " + (tok.votes || 0) + " letter votes). You picked " + pick + ".")
+      : ("Read via pad at " + SB.confPct(tok.conf) + ".");
+
+    if (got === target) {
+      progress.letters[target] = progress.letters[target] || { tried: 0, n: 0, correct: 0 };
+      progress.letters[target].correct++;
+      state.sessionCorrect++;
+      progress.streak++;
+      progress.best = Math.max(progress.best, progress.streak);
+      arena.classList.add("is-correct");
+      if (gotBtn) {
+        gotBtn.classList.remove("is-miss");
+        gotBtn.classList.add("is-correct");
+      }
+      showFeedback("correct",
+        "<span class='fb-ico'>✓</span><div><strong>Correct — clip matches " + target + "</strong>" +
+        "<p>" + detail + (tok.conf < 0.85
+          ? " Near-miss confidence — practice this handshape again."
+          : " Clear handshape.") +
+        "</p></div>");
+      if (progress.review.length && progress.review[0] === target) {
+        progress.review.shift();
+      }
+      save();
+      updateStats();
+      bumpStat("#statStreak");
+      syncRecUi();
+      state.nextTimer = setTimeout(pickTarget, SB.settings.reduceMotion ? 200 : 900);
+    } else {
+      progress.streak = 0;
+      var info = SB.LETTER_MAP[target];
+      var confs = (SB.CONFUSIONS[target] || []).slice(0, 3);
+      if (padBtn) padBtn.classList.add("is-miss");
+      if (gotBtn && got !== pick) gotBtn.classList.add("is-live");
+      arena.classList.add("is-wrong");
+      showFeedback("missed",
+        "<span class='fb-ico'>✕</span><div><strong>Not quite — target " + target + ", clip read " + got + "</strong>" +
+        "<p>" + detail + "</p>" +
+        "<p>Check the handshape. <em>" + info.tip + "</em></p>" +
+        (confs.length ? "<p>Often confused with: <strong>" + confs.join(" · ") + "</strong>.</p>" : "") +
+        "<div class='fb-actions'>" +
+        "<button type='button' class='btn btn-soft btn-sm' data-retry>Try again</button>" +
+        "<button type='button' class='btn btn-ghost btn-sm' data-next>Next letter</button>" +
+        "</div></div>");
+      if (progress.review.indexOf(target) === -1) progress.review.push(target);
+      save();
+      updateStats();
+      setTimeout(function () { arena.classList.remove("is-wrong"); }, 450);
+
+      var retry = SB.$("[data-retry]", SB.$("#feedback"));
+      var next = SB.$("[data-next]", SB.$("#feedback"));
+      if (retry) {
+        retry.addEventListener("click", function () {
+          state.locked = false;
+          clearClip();
+          arena.className = "arena-target";
+          resetFeedbackIdle();
+          SB.$$("#letterPad button").forEach(function (b) {
+            b.classList.toggle("is-target", b.dataset.l === target);
+            b.classList.remove("is-live", "is-miss", "is-correct");
+          });
+          syncRecUi();
+        });
+      }
+      if (next) {
+        next.addEventListener("click", function () { pickTarget(); });
+      }
+      state.locked = false;
+      syncRecUi();
+    }
+  }
+
+  /**
+   * Pad / keyboard: grade recorded clip (preferred) or simulated drill.
+   * Pick = letter the learner taps; got = classifier vote over the clip.
+   */
+  function sign(letter) {
+    if (state.locked || state.tab !== "assess") return;
+    if (recording) {
+      SB.toast("Stop recording before grading", "info");
+      return;
+    }
+    letter = String(letter || "").toUpperCase();
+    if (!/^[A-Z]$/.test(letter)) return;
+
+    /* Camera path: require a landmark clip, then grade from buffer. */
+    if (cameraOn) {
+      if (!clipReady || !clipFeats.length) {
+        SB.toast("Record and stop a clip first, then pick a letter", "info");
+        resetFeedbackIdle();
+        return;
+      }
+      var analysis = gradeClip();
+      if (!analysis) {
+        SB.toast("Could not read a letter from the clip — record again", "error");
+        return;
+      }
+
+      progress.letters[state.target] = progress.letters[state.target] || { tried: 0, n: 0, correct: 0 };
+      progress.letters[state.target].tried++;
+      progress.letters[state.target].n++;
+      state.sessionTried++;
+      state.locked = true;
+      syncRecUi();
+
+      applyGuess({
+        text: analysis.text,
+        pick: letter,
+        conf: analysis.conf,
+        frames: analysis.frames,
+        votes: analysis.votes,
+        source: "clip",
+      });
+      return;
+    }
+
+    /* No camera: keep SimEngine pad drills. */
     progress.letters[letter] = progress.letters[letter] || { tried: 0, n: 0, correct: 0 };
     progress.letters[letter].tried++;
     progress.letters[letter].n++;
     state.sessionTried++;
     state.locked = true;
-
     SB.Engine.signLetter(letter, function (tok) {
-      var got = tok.text;
-      var padBtn = SB.$('#letterPad button[data-l="' + letter + '"]');
-      var arena = SB.$("#arenaTarget");
-
-      if (got === target) {
-        progress.letters[letter].correct++;
-        state.sessionCorrect++;
-        progress.streak++;
-        progress.best = Math.max(progress.best, progress.streak);
-        arena.classList.add("is-correct");
-        if (padBtn) {
-          padBtn.classList.remove("is-miss");
-          padBtn.classList.add("is-correct");
-        }
-        showFeedback("correct",
-          "<span class='fb-ico'>✓</span><div><strong>Correct — " + target + "</strong>" +
-          "<p>" + (tok.conf < 0.85
-            ? "Caught at " + SB.confPct(tok.conf) + " (near-miss zone). Practice this handshape again later."
-            : "Read at " + SB.confPct(tok.conf) + ". Clear handshape.") +
-          "</p></div>");
-        if (progress.review.length && progress.review[0] === target) {
-          progress.review.shift();
-        }
-        save();
-        updateStats();
-        bumpStat("#statStreak");
-        state.nextTimer = setTimeout(pickTarget, SB.settings.reduceMotion ? 200 : 700);
-      } else {
-        progress.streak = 0;
-        var info = SB.LETTER_MAP[target];
-        var confs = (SB.CONFUSIONS[target] || []).slice(0, 3);
-        if (padBtn) padBtn.classList.add("is-miss");
-        arena.classList.add("is-wrong");
-        showFeedback("missed",
-          "<span class='fb-ico'>✕</span><div><strong>Not quite — read as " + got + "</strong>" +
-          "<p>Check the handshape. <em>" + info.tip + "</em></p>" +
-          (confs.length ? "<p>Often confused with: <strong>" + confs.join(" · ") + "</strong>.</p>" : "") +
-          "<div class='fb-actions'>" +
-          "<button type='button' class='btn btn-soft btn-sm' data-retry>Try again</button>" +
-          "<button type='button' class='btn btn-ghost btn-sm' data-next>Next letter</button>" +
-          "</div></div>");
-        if (progress.review.indexOf(target) === -1) progress.review.push(target);
-        save();
-        updateStats();
-        setTimeout(function () { arena.classList.remove("is-wrong"); }, 450);
-
-        var retry = SB.$("[data-retry]", SB.$("#feedback"));
-        var next = SB.$("[data-next]", SB.$("#feedback"));
-        if (retry) {
-          retry.addEventListener("click", function () {
-            state.locked = false;
-            arena.className = "arena-target";
-            resetFeedbackIdle();
-            SB.$$("#letterPad button").forEach(function (b) {
-              b.classList.toggle("is-target", b.dataset.l === target);
-            });
-          });
-        }
-        if (next) {
-          next.addEventListener("click", function () { pickTarget(); });
-        }
-        /* unlock after miss so try-again works; don't auto-advance */
-        state.locked = false;
-      }
+      applyGuess(Object.assign({ source: "demo", pick: letter }, tok));
     });
   }
 
@@ -220,7 +895,7 @@ SB.PracticeView = function () {
 
   function bindKeyboard() {
     document.addEventListener("keydown", function (e) {
-      if (state.tab !== "letters") return;
+      if (state.tab !== "assess") return;
       if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
       var k = e.key.toUpperCase();
       if (/^[A-Z]$/.test(k)) {
@@ -271,35 +946,35 @@ SB.PracticeView = function () {
     if (SB.PracticeView._rerenderReview) SB.PracticeView._rerenderReview();
   }
 
-  function bindPhraseDeck() {
-    var deck = SB.$("#phraseDeck");
-    deck.innerHTML = "";
-    SB.PHRASES.forEach(function (p) {
-      var card = document.createElement("div");
-      card.className = "phrase-card";
-      card.innerHTML =
-        '<div class="pc-top"><span class="pc-glyph">' + p.emoji + "</span><h4>" + p.name + "</h4></div>" +
-        "<p>" + p.desc + "</p>" +
-        '<div class="pc-actions"><span class="badge badge-cat">' + p.cat + "</span>" +
-        '<button class="btn btn-soft btn-sm">Practice</button></div>';
-      var btn = card.querySelector(".pc-actions .btn");
-      btn.addEventListener("click", function () {
-        btn.disabled = true;
-        var t = new SB.Transcript(SB.$("#phraseResult"), {});
-        t.clear();
-        SB.Engine.signPhrase(p.id, function (tok) { t.addToken(tok); }).then(function () {
-          t.endUtterance();
-          progress.phrases[p.id] = progress.phrases[p.id] || { tried: 0, n: 0 };
-          progress.phrases[p.id].tried++;
-          progress.phrases[p.id].n++;
-          save();
-          btn.disabled = false;
-          SB.toast("Practiced \"" + p.name + "\"", "ok");
-        });
-      });
-      deck.appendChild(card);
-    });
-  }
-
-  return { init: init };
+  var api = {
+    init: init,
+    /* CDP / local harness: seed a landmark clip then pad-grade. */
+    _debugSeedClip: function (letter, frames) {
+      letter = normalizeLiveLetter(letter) || "A";
+      frames = frames || 12;
+      clipFeats = [];
+      clipVotes = [];
+      var i;
+      for (i = 0; i < frames; i++) {
+        clipFeats.push(new Float32Array(63));
+        clipVotes.push({ text: letter, conf: 0.88 });
+      }
+      var orig = SB.LetterClassifier && SB.LetterClassifier.classify;
+      if (SB.LetterClassifier) {
+        SB.LetterClassifier.classify = function () {
+          return { text: letter, conf: 0.9, source: "live" };
+        };
+      }
+      clipReady = true;
+      syncRecUi();
+      resetFeedbackIdle();
+      return {
+        frames: clipFeats.length,
+        restore: function () {
+          if (SB.LetterClassifier && orig) SB.LetterClassifier.classify = orig;
+        },
+      };
+    },
+  };
+  return api;
 };

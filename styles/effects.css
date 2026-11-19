@@ -1,0 +1,847 @@
+/* ============================================================
+   SignBridge — BeUI + Aceternity pattern layer
+   Ported visual/motion patterns for the vanilla stack
+   (React libraries require a build step; these mirror their
+   official looks while preserving SignBridge tokens & IDs).
+   Sources: beui.dev · ui.aceternity.com
+   ============================================================ */
+
+/* ---------- Aceternity: Spotlight (full-viewport mouse follow) ---------- */
+.ac-spotlight {
+  --sx: 50%;
+  --sy: 38%;
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  width: 100dvw;
+  height: 100dvh;
+  z-index: 0;
+  overflow: hidden;
+}
+.ac-spotlight::before {
+  content: "";
+  position: absolute;
+  width: min(160vmax, 2200px);
+  height: min(160vmax, 2200px);
+  left: var(--sx);
+  top: var(--sy);
+  transform: translate(-50%, -50%);
+  background: radial-gradient(
+    ellipse at center,
+    rgba(52, 224, 192, 0.20) 0%,
+    rgba(139, 140, 255, 0.11) 28%,
+    transparent 58%
+  );
+  opacity: 0;
+  animation: acSpotlightIn 1.2s cubic-bezier(.22, .8, .32, 1) .15s both;
+  will-change: left, top;
+  transition: left 90ms linear, top 90ms linear;
+}
+[data-theme="light"] .ac-spotlight::before {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(14, 159, 134, 0.16) 0%,
+    rgba(91, 91, 214, 0.09) 28%,
+    transparent 58%
+  );
+}
+@keyframes acSpotlightIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.72); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+/* ---------- Aceternity: Background Beams (SVG paths) ---------- */
+.ac-beams {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  opacity: 0.55;
+}
+.ac-beams svg {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  inset: 0;
+}
+.ac-beams path {
+  fill: none;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-dasharray: 8 22;
+  animation: acBeamDrift 14s linear infinite;
+}
+.ac-beams path:nth-child(odd)  { stroke: rgba(52, 224, 192, 0.35); animation-duration: 11s; }
+.ac-beams path:nth-child(even) { stroke: rgba(139, 140, 255, 0.32); animation-duration: 16s; animation-direction: reverse; }
+[data-theme="light"] .ac-beams path:nth-child(odd)  { stroke: rgba(14, 159, 134, 0.28); }
+[data-theme="light"] .ac-beams path:nth-child(even) { stroke: rgba(91, 91, 214, 0.24); }
+@keyframes acBeamDrift {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -240; }
+}
+
+/* Keep app content above decorative layers.
+   Do NOT set position here — overriding drawer/backdrop to
+   position:relative breaks fixed positioning (settings appears
+   in-flow / misplaced and can steal clicks). */
+.app {
+  position: relative;
+  z-index: 1;
+}
+.ac-beams,
+.ac-spotlight {
+  pointer-events: none !important;
+}
+.drawer-backdrop {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+}
+.drawer-backdrop.is-open {
+  pointer-events: auto;
+}
+.drawer {
+  position: fixed;
+  z-index: 61;
+}
+.toast-wrap {
+  position: fixed;
+  z-index: 90;
+}
+
+/* ---------- Aceternity: Hero highlight / text shimmer ---------- */
+.ac-text-shimmer {
+  background: linear-gradient(
+    110deg,
+    var(--text) 0%,
+    var(--teal) 35%,
+    var(--violet) 55%,
+    var(--text) 75%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: acShimmer 5.5s ease-in-out infinite;
+}
+@keyframes acShimmer {
+  0%, 100% { background-position: 100% 50%; }
+  50% { background-position: 0% 50%; }
+}
+
+/* ---------- Aceternity: Wobble / glare cards ---------- */
+.ac-wobble {
+  transform-style: preserve-3d;
+  will-change: transform;
+  transition: transform 180ms cubic-bezier(.22, .8, .32, 1), box-shadow var(--t-med) var(--ease);
+}
+.ac-wobble.is-tilting {
+  transition: none;
+}
+.ac-glare {
+  position: relative;
+  overflow: hidden;
+}
+.ac-glare::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: -40%;
+  background: radial-gradient(
+    circle at var(--gx, 50%) var(--gy, 50%),
+    rgba(255, 255, 255, 0.16) 0%,
+    transparent 42%
+  );
+  opacity: 0;
+  transition: opacity 220ms var(--ease);
+  mix-blend-mode: soft-light;
+}
+.ac-glare:hover::after { opacity: 1; }
+
+/* Soft glass surface on primary cards (Aceternity glass + BeUI surface) */
+.card.ac-glass {
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.15);
+  -webkit-backdrop-filter: blur(14px) saturate(1.15);
+  border-color: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  box-shadow:
+    var(--shadow-1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ---------- BeUI: Spring-pressed / magnetic buttons ---------- */
+.btn, .chip, .icon-btn, .letter-pad button, .alt-btn {
+  --press: 1;
+  transform: scale(var(--press)) translateY(var(--lift, 0px));
+  transition:
+    transform 180ms cubic-bezier(.34, 1.4, .64, 1),
+    box-shadow var(--t-fast) var(--ease),
+    background var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast);
+}
+.btn:active, .chip:active, .icon-btn:active, .letter-pad button:active {
+  --press: 0.94;
+}
+.btn-primary {
+  position: relative;
+  overflow: hidden;
+}
+.btn-primary::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(120deg, transparent 20%, rgba(255,255,255,.28) 48%, transparent 72%);
+  transform: translateX(-120%);
+  transition: transform .55s var(--ease);
+}
+.btn-primary:hover::before { transform: translateX(120%); }
+.btn-primary:hover { --lift: -2px; box-shadow: var(--glow-teal); }
+.btn-ghost:hover, .btn-soft:hover { --lift: -1px; }
+
+.be-magnetic {
+  will-change: transform;
+}
+
+/* ---------- BeUI: Tabs / segmented gliding pill ---------- */
+.nav, .segmented {
+  position: relative;
+}
+.nav .be-pill,
+.segmented .be-pill {
+  position: absolute;
+  z-index: 0;
+  border-radius: 999px;
+  background: var(--grad);
+  box-shadow: var(--shadow-1);
+  transition:
+    left var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
+    top var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
+    width var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
+    height var(--sb-nav-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16, 1, .3, 1)),
+    opacity 180ms var(--ease);
+  pointer-events: none;
+  opacity: 0;
+}
+.nav .be-pill.is-ready,
+.segmented .be-pill.is-ready { opacity: 1; }
+.nav a, .segmented button {
+  position: relative;
+  z-index: 1;
+}
+.nav a.active {
+  background: transparent !important;
+  color: #041018 !important;
+  box-shadow: none !important;
+}
+[data-theme="light"] .nav a.active { color: #041018 !important; }
+
+/* Segmented with native track: never show BeUI gradient pill */
+.segmented:has(.seg-track) > .be-pill,
+#modeSeg > .be-pill {
+  display: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+.segmented button.is-on {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+/* Demo/Live: solid active button — hide sliding track (avoids crescent/glow) */
+#modeSeg {
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: #0e1526;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+[data-theme="light"] #modeSeg {
+  background: #e8eef8;
+  border-color: rgba(20, 40, 100, 0.12);
+}
+#modeSeg .seg-track {
+  display: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+#modeSeg button {
+  box-shadow: none !important;
+  text-shadow: none !important;
+  filter: none !important;
+  border: 0 !important;
+  outline: none !important;
+}
+#modeSeg button:not(.is-on) {
+  background: transparent !important;
+  color: var(--text-2) !important;
+}
+#modeSeg button.is-on,
+#modeSeg button.is-on.slug-demo,
+#modeSeg button.is-on.slug-live {
+  background: #243049 !important;
+  color: var(--text) !important;
+  box-shadow: none !important;
+}
+[data-theme="light"] #modeSeg button.is-on,
+[data-theme="light"] #modeSeg button.is-on.slug-demo,
+[data-theme="light"] #modeSeg button.is-on.slug-live {
+  background: #ffffff !important;
+  color: #0c1424 !important;
+}
+
+/* ---------- BeUI: Glass topbar (full-bleed; no side inset hack) ---------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  border-bottom: 1px solid var(--border);
+}
+
+.logo-mark {
+  transition: color 180ms var(--ease), transform 240ms cubic-bezier(.34, 1.4, .64, 1);
+}
+.logo:hover .logo-mark {
+  transform: scale(1.06);
+  color: var(--teal);
+  box-shadow: none;
+}
+
+/* ---------- BeUI: Spring toggle + drawer ---------- */
+.toggle {
+  transition: background 220ms cubic-bezier(.34, 1.35, .64, 1), border-color var(--t-fast);
+}
+.toggle::after {
+  transition:
+    transform 280ms cubic-bezier(.34, 1.5, .64, 1),
+    background 180ms var(--ease),
+    width 180ms var(--ease);
+}
+.toggle:active::after { width: 22px; }
+.toggle.is-on:active::after { transform: translateX(16px); }
+
+.drawer {
+  transition: transform 380ms cubic-bezier(.32, 1.15, .45, 1);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.drawer-backdrop {
+  backdrop-filter: blur(6px) saturate(1.1);
+  -webkit-backdrop-filter: blur(6px) saturate(1.1);
+}
+
+/* ---------- BeUI: Stacked toasts ---------- */
+.toast-wrap {
+  gap: 10px;
+}
+.toast {
+  animation: beToastIn 360ms cubic-bezier(.34, 1.4, .64, 1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--surface-3) 88%, transparent);
+}
+@keyframes beToastIn {
+  from { opacity: 0; transform: translateY(18px) scale(.92); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ---------- Stage ambient (no hard vertical grid seam) ---------- */
+.stage::before {
+  content: none !important;
+  display: none !important;
+}
+.stage video { z-index: 1; }
+.stage canvas { pointer-events: none; }
+.stage.is-cam canvas { z-index: 4; }
+.stage-demo { z-index: 3; }
+
+/* Spotlight recognition panel — stronger Aceternity card feel */
+#spotlight.ac-glare {
+  border: 1px solid color-mix(in srgb, var(--teal) 28%, var(--border));
+  background:
+    linear-gradient(160deg, color-mix(in srgb, var(--teal-soft) 55%, var(--surface)) 0%, var(--surface) 55%);
+}
+
+/* Learn / phrase cards get subtle edge glow on hover */
+.sign-card.ac-wobble:hover,
+.phrase-card.ac-wobble:hover,
+.fact-card.ac-glare:hover {
+  border-color: color-mix(in srgb, var(--teal) 35%, var(--border-strong));
+  box-shadow: var(--shadow-2), 0 0 0 1px color-mix(in srgb, var(--teal) 18%, transparent);
+}
+
+/* Auth form card — gradient border frame */
+.auth-form-card.ac-glass {
+  box-shadow:
+    var(--shadow-2),
+    0 0 0 1px color-mix(in srgb, var(--teal) 20%, transparent),
+    0 20px 60px -30px rgba(52, 224, 192, 0.25);
+}
+
+/* Engine pill pulse polish */
+.engine-pill {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+/* ---------- Aceternity/BeUI: Camera-waiting stage loader ---------- */
+.stage-wait-fx {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 42%, rgba(52, 224, 192, 0.14), transparent 62%),
+    radial-gradient(ellipse 50% 40% at 70% 70%, rgba(139, 140, 255, 0.10), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-solid) 70%, transparent), color-mix(in srgb, var(--bg) 85%, transparent));
+}
+.stage.is-waiting .stage-wait-fx { display: block; }
+.stage-wait-beams {
+  position: absolute;
+  inset: -20%;
+  background:
+    repeating-linear-gradient(
+      115deg,
+      transparent 0 18px,
+      rgba(52, 224, 192, 0.05) 18px 19px,
+      transparent 19px 38px
+    );
+  mask-image: radial-gradient(ellipse 55% 50% at 50% 45%, #000 20%, transparent 75%);
+  -webkit-mask-image: radial-gradient(ellipse 55% 50% at 50% 45%, #000 20%, transparent 75%);
+  animation: stageWaitBeam 10s linear infinite;
+  opacity: 0.7;
+}
+.stage-wait-orbits {
+  position: absolute;
+  left: 50%;
+  top: 32%;
+  width: 128px;
+  height: 128px;
+  transform: translate(-50%, -50%);
+  filter: drop-shadow(0 0 22px rgba(52, 224, 192, 0.28));
+}
+.stage-wait-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  border-top-color: rgba(52, 224, 192, 0.95);
+  border-right-color: rgba(139, 140, 255, 0.48);
+  animation: stageWaitSpin 2.8s linear infinite;
+  box-shadow: 0 0 32px rgba(52, 224, 192, 0.22);
+  will-change: transform;
+}
+.stage-wait-ring:nth-child(2) {
+  inset: 15px;
+  border-width: 2.75px;
+  border-top-color: rgba(139, 140, 255, 0.9);
+  border-right-color: rgba(52, 224, 192, 0.36);
+  animation-duration: 4.2s;
+  animation-direction: reverse;
+}
+.stage-wait-ring:nth-child(3) {
+  inset: 30px;
+  border-width: 2.5px;
+  border-top-color: rgba(52, 224, 192, 0.78);
+  border-left-color: rgba(139, 140, 255, 0.52);
+  border-right-color: transparent;
+  animation-duration: 2.1s;
+}
+.stage-wait-core {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 28%, #fff 0%, #b7fff0 22%, var(--teal) 55%, transparent 78%);
+  box-shadow:
+    0 0 12px 3px rgba(255, 255, 255, 0.65),
+    0 0 34px 12px rgba(52, 224, 192, 0.85),
+    0 0 64px 22px rgba(52, 224, 192, 0.42),
+    0 0 96px 34px rgba(139, 140, 255, 0.32);
+  animation: stageWaitPulse 2.8s ease-in-out infinite;
+}
+.stage-wait-core::after {
+  content: "";
+  position: absolute;
+  inset: -28px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(52, 224, 192, 0.38) 0%, rgba(139, 140, 255, 0.16) 40%, transparent 72%);
+  animation: stageWaitHalo 2.8s ease-in-out infinite;
+  pointer-events: none;
+}
+.stage.is-waiting .stage-overlay-state {
+  background: transparent;
+  backdrop-filter: none;
+}
+.stage.is-waiting .stage-overlay-copy {
+  margin-top: 128px;
+  padding-top: 12px;
+}
+.stage.is-waiting .overlay-title {
+  font-size: clamp(1.05rem, 2.2vw, 1.35rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.stage.is-waiting .overlay-detail {
+  margin: 10px auto 0;
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+}
+@keyframes stageWaitSpin { to { transform: rotate(360deg); } }
+@keyframes stageWaitPulse {
+  0%, 100% { transform: scale(0.92); opacity: 0.82; }
+  50% { transform: scale(1.14); opacity: 1; }
+}
+@keyframes stageWaitHalo {
+  0%, 100% { transform: scale(0.9); opacity: 0.55; }
+  50% { transform: scale(1.18); opacity: 1; }
+}
+@keyframes stageWaitBeam {
+  from { transform: translate3d(-4%, 0, 0) rotate(0.001deg); }
+  to { transform: translate3d(4%, 0, 0) rotate(0.001deg); }
+}
+[data-theme="light"] .stage-wait-fx {
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 42%, rgba(14, 159, 134, 0.12), transparent 62%),
+    radial-gradient(ellipse 50% 40% at 70% 70%, rgba(91, 91, 214, 0.08), transparent 55%),
+    linear-gradient(180deg, color-mix(in srgb, var(--surface-solid) 78%, transparent), color-mix(in srgb, var(--bg) 88%, transparent));
+}
+
+/* Reduced motion: kill decorative motion, keep layout */
+@media (prefers-reduced-motion: reduce) {
+  .ac-spotlight::before,
+  .ac-beams path,
+  .ac-text-shimmer,
+  .logo-mark,
+  .toast,
+  .stage-wait-ring,
+  .stage-wait-core,
+  .stage-wait-core::after,
+  .stage-wait-beams {
+    animation: none !important;
+  }
+  .ac-wobble { transform: none !important; }
+  .nav .be-pill, .segmented .be-pill { transition: none !important; }
+  .sb-three-bg { display: none !important; }
+}
+
+/* ============================================================
+   Three.js atmosphere (pointer-events none — never steal clicks)
+   ============================================================ */
+.sb-three-bg {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  width: 100dvw;
+  height: 100dvh;
+  z-index: 0;
+  pointer-events: none !important;
+  overflow: hidden;
+}
+.sb-three-bg canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  pointer-events: none !important;
+}
+/* When Three background is live, fade CSS beam SVG; spotlight still follows pointer */
+html.sb-has-three .ac-beams {
+  display: none !important;
+}
+html.sb-has-three .ac-spotlight::before {
+  opacity: 0.55;
+}
+/* Kill asymmetric CSS mesh wash when Three owns the atmosphere */
+html.sb-has-three body::before {
+  display: none !important;
+  content: none !important;
+}
+
+.sb-three-orb,
+.sb-three-hand {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none !important;
+  overflow: visible;
+}
+.sb-three-orb canvas,
+.sb-three-hand canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none !important;
+}
+
+
+#stage {
+  isolation: isolate;
+}
+/* Theme-aware surfaces ease with polish --sb-theme-dur (avoid layout thrash) */
+.stage-card,
+.transcript-card,
+.arena,
+.etiquette,
+.auth-welcome,
+.auth-form-card,
+#stage {
+  transition:
+    background-color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    background var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    border-color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    box-shadow var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1)),
+    color var(--sb-theme-dur, 320ms) var(--sb-theme-ease, cubic-bezier(.16,1,.3,1));
+}
+
+/* Dark panels: soft frosted glass so Demo/Live share the same Three atmosphere.
+   Translate used to force opaque slabs that buried the particle field. */
+html[data-theme="dark"] .view--translate {
+  background: transparent;
+}
+/* Kill the opaque view underlay when Three owns the page bg */
+html[data-theme="dark"].sb-has-three .view--translate::before,
+html[data-theme="dark"].sb-has-three .view--practice::before,
+html[data-theme="dark"].sb-has-three .view--learn::before,
+html[data-theme="dark"].sb-has-three .view--auth::before {
+  background: transparent !important;
+}
+html[data-theme="dark"] .stage-card,
+html[data-theme="dark"] .stage-card.ac-glass,
+html[data-theme="dark"] .transcript-card,
+html[data-theme="dark"] .transcript-card.ac-glass,
+html[data-theme="dark"] .arena,
+html[data-theme="dark"] .arena.ac-glass,
+html[data-theme="dark"] .stats-card > .card,
+html[data-theme="dark"] .stats-card > .card.ac-glass,
+html[data-theme="dark"] .etiquette,
+html[data-theme="dark"] .etiquette.ac-glass,
+html[data-theme="dark"] .auth-welcome,
+html[data-theme="dark"] .auth-welcome.ac-glass,
+html[data-theme="dark"] .auth-form-card,
+html[data-theme="dark"] .auth-form-card.ac-glass,
+html[data-theme="dark"].sb-has-three .stage-card,
+html[data-theme="dark"].sb-has-three .stage-card.ac-glass,
+html[data-theme="dark"].sb-has-three .transcript-card,
+html[data-theme="dark"].sb-has-three .transcript-card.ac-glass,
+html[data-theme="dark"].sb-has-three .arena,
+html[data-theme="dark"].sb-has-three .arena.ac-glass,
+html[data-theme="dark"].sb-has-three .stats-card > .card,
+html[data-theme="dark"].sb-has-three .etiquette,
+html[data-theme="dark"].sb-has-three .auth-welcome,
+html[data-theme="dark"].sb-has-three .auth-form-card {
+  background: color-mix(in srgb, #0d1425 72%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.15) !important;
+  --gx: 50%;
+  --gy: 50%;
+}
+.stage-card.ac-glare::after,
+.transcript-card.ac-glare::after,
+.arena.ac-glare::after,
+.stats-card > .card.ac-glare::after,
+.etiquette.ac-glare::after,
+.auth-welcome.ac-glare::after,
+.auth-form-card.ac-glare::after {
+  display: none !important;
+  content: none !important;
+  opacity: 0 !important;
+}
+/* Soft inner chrome — keep readable, let edges breathe */
+html[data-theme="dark"] .stage-card .stage-head,
+html[data-theme="dark"] .stage-card .spell-strip,
+html[data-theme="dark"] .stage-card .stage-status,
+html[data-theme="dark"] .stage-card .demo-hint-bar,
+html[data-theme="dark"] .transcript-card > header,
+html[data-theme="dark"] .transcript-card .tx-head,
+html[data-theme="dark"] .transcript-card .tx-actions,
+html[data-theme="dark"] .transcript-card .tx-current {
+  background-color: color-mix(in srgb, #0d1425 55%, transparent) !important;
+  background-image: none !important;
+}
+/* Camera well: solid enough for the video plane; Live keeps page Three around it */
+html[data-theme="dark"] #stage,
+html[data-theme="dark"].sb-has-three #stage,
+html[data-theme="dark"] .stage-card #stage,
+html[data-theme="dark"] .stage-card .stage {
+  background: color-mix(in srgb, #0d1425 88%, transparent) !important;
+}
+html[data-theme="dark"] .stage.is-cam,
+html[data-theme="dark"].sb-has-three .stage.is-cam {
+  background: #0a1220 !important;
+}
+html[data-theme="dark"] .transcript-card .tx-current {
+  background: color-mix(in srgb, #0d1425 70%, #1a2438) !important;
+}
+/* Light: soft frosted glass — Three shows through; text stays dark/readable */
+html[data-theme="light"] .stage-card,
+html[data-theme="light"] .stage-card.ac-glass,
+html[data-theme="light"] .transcript-card,
+html[data-theme="light"] .transcript-card.ac-glass,
+html[data-theme="light"] .arena,
+html[data-theme="light"] .arena.ac-glass,
+html[data-theme="light"] .stats-card > .card,
+html[data-theme="light"] .etiquette,
+html[data-theme="light"] .auth-welcome,
+html[data-theme="light"] .auth-form-card,
+html[data-theme="light"].sb-has-three .stage-card,
+html[data-theme="light"].sb-has-three .transcript-card,
+html[data-theme="light"].sb-has-three .arena,
+html[data-theme="light"].sb-has-three .stats-card > .card,
+html[data-theme="light"].sb-has-three .etiquette,
+html[data-theme="light"].sb-has-three .auth-welcome,
+html[data-theme="light"].sb-has-three .auth-form-card {
+  background: rgba(255, 255, 255, 0.58) !important;
+  backdrop-filter: blur(14px) saturate(1.12) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.12) !important;
+  border-color: rgba(20, 40, 100, 0.14) !important;
+}
+html[data-theme="light"] .stage-card .stage-head,
+html[data-theme="light"] .stage-card .spell-strip,
+html[data-theme="light"] .stage-card .stage-status,
+html[data-theme="light"] .stage-card .demo-hint-bar,
+html[data-theme="light"] .stage-card #stage,
+html[data-theme="light"] .stage-card .stage,
+html[data-theme="light"] .transcript-card > header,
+html[data-theme="light"] .transcript-card .tx-head,
+html[data-theme="light"] .transcript-card .tx-actions,
+html[data-theme="light"] .transcript-card .tx-current,
+html[data-theme="light"] #stage {
+  background: rgba(255, 255, 255, 0.42) !important;
+  background-image: none !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+}
+html[data-theme="light"] .transcript-card .tx-action {
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+}
+html[data-theme="light"] .transcript-card .tx-action-primary {
+  background: color-mix(in srgb, var(--teal) 16%, #fff);
+  color: color-mix(in srgb, var(--teal) 70%, #0a1a18);
+}
+html[data-theme="light"] .tx-current-word,
+html[data-theme="light"] .tx-current.has-sign .tx-current-word,
+html[data-theme="light"] .tx-title h2,
+html[data-theme="light"] .tx-status {
+  color: #0c1424 !important;
+}
+html[data-theme="light"] .tx-current-word.is-high { color: #0d9488 !important; }
+html[data-theme="light"] .tx-current-word.is-mid { color: #d97706 !important; }
+html[data-theme="light"] .tx-current-word.is-low { color: #dc2626 !important; }
+html[data-theme="light"] .stream-src.src-demo { color: #d97706 !important; }
+html[data-theme="light"] .topbar {
+  background: color-mix(in srgb, #e8edf6 70%, transparent) !important;
+  backdrop-filter: blur(16px) saturate(1.15) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.15) !important;
+}
+/* Transcript words must stay readable in light (no white-on-white / dark-on-dark) */
+html[data-theme="light"] .stream-sentence,
+html[data-theme="light"] .stream-sentence .word,
+html[data-theme="light"] .spotlight-word,
+html[data-theme="light"] .empty-title,
+html[data-theme="light"] .empty-hint {
+  color: #0c1424 !important;
+  -webkit-text-fill-color: #0c1424;
+}
+html[data-theme="light"] .stream-sentence .word .conf-val {
+  color: #5c6b86 !important;
+  background: rgba(255, 255, 255, 0.85) !important;
+}
+.stage-demo { position: relative; z-index: 3; }
+/* Keep camera layers above decorative Three; do not change positioning */
+#stage video { z-index: 1; }
+#stage.is-cam canvas#overlay { z-index: 4; }
+
+/* No Three orbs on logo / empty / demo-hand — flat marks only */
+.logo-mark .sb-three-orb,
+.empty-icon .sb-three-orb,
+.demo-hand .sb-three-hand,
+.demo-hand .sb-three-orb {
+  display: none !important;
+}
+
+html.sb-three-paused .sb-three-bg,
+html.reduce-motion .sb-three-bg {
+  display: none !important;
+}
+
+/* Ensure app shell stays above the WebGL backdrop */
+.app {
+  position: relative;
+  z-index: 1;
+}
+/* Fill column gaps so Three particles don't flash a vertical strip between cards */
+.view--translate,
+.view--practice,
+.view--learn,
+.view--auth {
+  position: relative;
+  isolation: isolate;
+  /* padding set in views/polish — keeps title/cards off rounded underlay corners */
+  overflow: visible;
+}
+.view--translate::before,
+.view--practice::before,
+.view--learn::before,
+.view--auth::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: calc(var(--r-lg) + 4px);
+  background: #0a1220;
+  pointer-events: none;
+}
+[data-theme="light"] .view--translate::before,
+[data-theme="light"] .view--practice::before,
+[data-theme="light"] .view--learn::before,
+[data-theme="light"] .view--auth::before {
+  background: rgba(232, 238, 248, 0.45);
+}
+
+
+/* full-bleed topbar overflow guard */
+html, body { overflow-x: clip; }
+@supports not (overflow: clip) {
+  html, body { overflow-x: hidden; }
+}
+
+
+/* box-fit: content cards stay visible */
+.card:not(.stage-card) {
+  overflow: visible;
+}
+.stage-card {
+  overflow: visible;
+}
+.stage.is-cam,
+#modeSeg {
+  overflow: hidden;
+}
+.stage-card > .stage-head,
+.stage-card > .spell-strip,
+.stage-card > .stage-status {
+  position: relative;
+  z-index: 1;
+}

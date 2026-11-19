@@ -76,7 +76,7 @@ SB.SimEngine = function () {
   self.signPhrase = function (phraseId, onToken) {
     var p = SB.PHRASE_MAP[phraseId];
     if (!p) return Promise.resolve();
-    var words = p.name.split(/[?!/]/).filter(Boolean).map(function (w) {
+    var words = p.name.split(/[?!/\s]+/).filter(Boolean).map(function (w) {
       return tokenizeWord(w.trim());
     });
     return self.signTokens(words, onToken);
