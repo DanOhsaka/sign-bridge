@@ -306,7 +306,7 @@ SB.LiveEngine = function () {
     return new Promise(function (resolve, reject) {
       try {
         /* Classic worker: MediaPipe WASM uses importScripts (blocked in module workers). */
-        worker = new Worker("js/engine/handWorker.js?v=20261119skel");
+        worker = new Worker("js/engine/handWorker.js?v=20261026p8");
       } catch (err) {
         reject(err);
         return;
@@ -1108,8 +1108,14 @@ SB.LiveEngine = function () {
     prevRaw.right = rawHands.right;
     prevRaw.tMs = rawHands.tMs;
 
-    rawHands.left = left;
-    rawHands.right = right;
+    /* Accepted = live raw; brief TEMPORARILY_LOST hold keeps last raw for draw
+       but never feeds prediction velocity (prev stays frozen). */
+    rawHands.left = leftUp.accepted
+      ? leftSlot.lastRaw
+      : (leftUp.held ? leftSlot.lastRaw : null);
+    rawHands.right = rightUp.accepted
+      ? rightSlot.lastRaw
+      : (rightUp.held ? rightSlot.lastRaw : null);
     rawHands.tMs = wallMs;
     rawHands.mediaMs = mediaMs;
 
@@ -1118,11 +1124,19 @@ SB.LiveEngine = function () {
     stats.hands = handCount;
     if (SB.Engine && SB.Engine._hands) SB.Engine._hands(handCount);
 
-    /* Recognition uses measured landmarks only — never predicted UI coords */
-    if (classifier) {
-      var classifierHand = right || left;
+    heavyFrame++;
+    var runHeavy = (heavyFrame & 1) === 0;
+
+    /* Classify on accepted OR brief hold — landmarks are already gated.
+       Mirror display: flip x so handshapes match what the signer sees. */
+    if (runHeavy && classifier) {
+      var classifierHand =
+        ((leftUp.accepted || leftUp.held) && leftSlot.lastRaw) ||
+        ((rightUp.accepted || rightUp.held) && rightSlot.lastRaw) ||
+        null;
       if (classifierHand) {
-        var handForCls = mirror ? mirrorLandmarksX(classifierHand) : classifierHand;
+        var handForCls = classifierHand;
+        if (mirror) handForCls = mirrorLandmarksX(classifierHand);
         var features = landmarkVector(handForCls);
         var token = null;
         try { token = classifier(features); } catch (err) {
@@ -1151,20 +1165,53 @@ SB.LiveEngine = function () {
       }
     }
 
-    if (window.SignBridgeLiveTest &&
-        typeof window.SignBridgeLiveTest.processFrame === "function") {
-      try {
-        window.SignBridgeLiveTest.processFrame(results, left, right);
-      } catch (err) {
-        console.error("LSTM live test error:", err);
+    /* Hands mode has no pose — skip LSTM entirely (needs shoulders).
+       Training only while actively recording. */
+    var recording = false;
+    try {
+      if (SB.DataCapture && typeof SB.DataCapture.isRecording === "function") {
+        recording = !!SB.DataCapture.isRecording();
       }
-    }
-  }
+      if (!recording && window.TrainingRecorder &&
+          typeof window.TrainingRecorder.status === "function") {
+        var stRec = window.TrainingRecorder.status();
+        recording = !!(stRec && stRec.recording);
+      }
+    } catch (e) {}
+    var wantLstm = modelKind === "holistic" &&
+      window.SignBridgeLiveTest &&
+      typeof window.SignBridgeLiveTest.processFrame === "function" &&
+      window.SignBridgeLiveTest.status &&
+      window.SignBridgeLiveTest.status().active;
+    if (!recording && !wantLstm) return;
 
-  /* Holistic returns each hand as an array of detections; take the first. */
-  function firstGroup(list) {
-    if (!list || !list.length || !list[0] || !list[0].length) return null;
-    return cloneLandmarks(list[0]);
+    var snapLeft = leftUp.accepted ? leftSlot.lastRaw : null;
+    var snapRight = rightUp.accepted ? rightSlot.lastRaw : null;
+    if (!snapLeft && !snapRight && !wantLstm) return;
+
+    var snapResults = {
+      leftHandLandmarks: snapLeft ? [snapLeft] : [],
+      rightHandLandmarks: snapRight ? [snapRight] : [],
+      poseLandmarks: results.poseLandmarks || [],
+    };
+    queueMicrotask(function () {
+      if (recording && window.TrainingRecorder &&
+          typeof window.TrainingRecorder.processFrame === "function") {
+        try {
+          window.TrainingRecorder.processFrame(snapResults, snapLeft, snapRight);
+        } catch (err) {
+          console.error("Training recorder error:", err);
+        }
+      }
+
+      if (wantLstm) {
+        try {
+          window.SignBridgeLiveTest.processFrame(snapResults, snapLeft, snapRight);
+        } catch (err) {
+          console.error("LSTM live test error:", err);
+        }
+      }
+    });
   }
 
   function cloneLandmarks(src, buf) {
@@ -1277,21 +1324,64 @@ SB.LiveEngine = function () {
     var ctx = overlayCtx;
     ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
 
-    var age = rawHands.tMs ? Math.max(0, now - rawHands.tMs) : 0;
-    stats.frameAgeMs = age;
-    stats.handL = uiHands.left ? "tracking" : "lost";
-    stats.handR = uiHands.right ? "tracking" : "lost";
-
-    var dtSec = prevRaw.tMs ? Math.max(0, (rawHands.tMs - prevRaw.tMs) / 1000) : 0;
-    var leftDraw = predictHand(
-      uiHands.left, rawHands.left, prevRaw.left, dtSec, predictSec, leftPredBuf
+    var ageL = leftSlot.lastTMs ? leftSlot.landmarkAgeMs(now) : 0;
+    var ageR = rightSlot.lastTMs ? rightSlot.landmarkAgeMs(now) : 0;
+    stats.ageL = ageL;
+    stats.ageR = ageR;
+    stats.handL = leftSlot.status;
+    stats.handR = rightSlot.status;
+    stats.frameAgeMs = Math.min(
+      uiHands.left ? ageL : Infinity,
+      uiHands.right ? ageR : Infinity
     );
-    var rightDraw = predictHand(
-      uiHands.right, rawHands.right, prevRaw.right, dtSec, predictSec, rightPredBuf
+    if (!isFinite(stats.frameAgeMs)) stats.frameAgeMs = 0;
+
+    /*
+     * Pass 8: max lead within adaptive TTL (age-weighted), hard velocity clamp.
+     * Fade as age→TTL. Never extrapolate LOST / past-TTL (P5/P6 no-ghost).
+     * Never blank while holding inside TTL.
+     */
+    var freshMs = stats.holdTtlMs || SB.HAND_HOLD_TTL_MS || 160;
+    paintLeadSec = Math.min(
+      0.07,
+      Math.max(predictSec, stats.frameAgeMs / 1000 * 0.6 + predictSec * 0.7)
     );
 
-    if (leftDraw) drawHand(ctx, leftDraw, "L", false);
-    if (rightDraw) drawHand(ctx, rightDraw, "R", false);
+    function drawSlot(slot, ui, raw, prev, label) {
+      if (!ui) return;
+      var st = slot.status;
+      var tracking = st === SB.HAND_STATUS.TRACKING;
+      var holding = st === SB.HAND_STATUS.TEMPORARILY_LOST;
+      if (!tracking && !holding) return;
+      var age = slot.landmarkAgeMs(now);
+      if (!isFinite(age) || age > freshMs) return; /* adaptive freshness TTL */
+
+      var dtSec = 1 / 30;
+      if (prev && raw && slot.lastTMs && prevRaw.tMs) {
+        dtSec = Math.max(1e-3, (rawHands.tMs - prevRaw.tMs) / 1000);
+      }
+      var lead = 0;
+      if (prev && age < freshMs) {
+        var fade = 1 - age / Math.max(freshMs, 1);
+        /* Keep most of the lead while fresh; fade only near TTL edge */
+        var edge = fade * fade; /* stay snappy early in the TTL window */
+        if (tracking) {
+          lead = paintLeadSec * (0.55 + 0.45 * edge);
+        } else if (holding) {
+          lead = paintLeadSec * 0.75 * edge;
+        }
+      }
+      var drawn = predictHand(ui, raw, prev, dtSec, lead, slot.predBuf);
+      if (drawn) drawHand(ctx, drawn, label, false);
+    }
+
+    if (showDebugTrack) {
+      if (debugRawHands.left) drawHand(ctx, debugRawHands.left, "rawL", true);
+      if (debugRawHands.right) drawHand(ctx, debugRawHands.right, "rawR", true);
+    }
+
+    drawSlot(leftSlot, uiHands.left, rawHands.left, prevRaw.left, "L");
+    drawSlot(rightSlot, uiHands.right, rawHands.right, prevRaw.right, "R");
   }
 
   function drawHand(ctx, landmarks, label, isDebugRaw) {

@@ -2,7 +2,6 @@
    SignBridge — Pose + hand landmarker Web Worker (classic)
    Must be a classic worker: MediaPipe's WASM loader calls
    importScripts(), which module workers disallow.
-   Dynamic import() loads the ESM vision bundle.
 
    Pose Landmarker Lite supplies the shoulder, elbow, and wrist
    points. Hand Landmarker supplies both 21-point hands. The
@@ -10,7 +9,12 @@
    LSTM frame builder does not change.
    ============================================================ */
 
-/* global importScripts */
+var landmarker = null;
+var modelKind = "hands"; /* "hands" | "holistic" */
+var FilesetResolver = null;
+var HandLandmarker = null;
+var HolisticLandmarker = null;
+var visionFileset = null;
 
 var poseLandmarker = null;
 var handLandmarker = null;
@@ -106,6 +110,30 @@ async function init(preferGpu) {
   var vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
   );
+}
+
+function closeLandmarker() {
+  if (landmarker && typeof landmarker.close === "function") {
+    try { landmarker.close(); } catch (e) {}
+  }
+  landmarker = null;
+}
+
+function buildHandOpts(delegate) {
+  return {
+    baseOptions: {
+      modelAssetPath: HAND_MODEL,
+      delegate: delegate,
+    },
+    runningMode: "VIDEO",
+    numHands: 2,
+    /* Detect a bit stricter; keep tracking lower so face-edge flicker
+       does not flip presence every frame (pass 6 hysteresis). */
+    minHandDetectionConfidence: 0.55,
+    minHandPresenceConfidence: 0.5,
+    minTrackingConfidence: 0.4,
+  };
+}
 
   var delegate = preferGpu ? "GPU" : "CPU";
   try {
@@ -129,10 +157,15 @@ async function init(preferGpu) {
 self.onmessage = function (ev) {
   var msg = ev.data || {};
 
-  if (msg.type === "init") {
-    init(msg.preferGpu !== false)
+  if (msg.type === "init" || msg.type === "reinit") {
+    var kind = msg.model === "holistic" ? "holistic" : "hands";
+    createModel(kind, msg.preferGpu !== false)
       .then(function (info) {
-        self.postMessage({ type: "ready", info: info });
+        self.postMessage({
+          type: "ready",
+          info: info,
+          reinit: msg.type === "reinit",
+        });
       })
       .catch(function (err) {
         self.postMessage({
@@ -155,9 +188,31 @@ self.onmessage = function (ev) {
       var hands = handLandmarker.detectForVideo(msg.bitmap, msg.timestamp);
       var split = splitHands(hands);
       if (msg.bitmap && msg.bitmap.close) msg.bitmap.close();
+
+      var payload;
+      if (modelKind === "holistic") {
+        var lh = serializeGroups(results.leftHandLandmarks);
+        var rh = serializeGroups(results.rightHandLandmarks);
+        payload = {
+          leftHandLandmarks: lh,
+          rightHandLandmarks: rh,
+          poseLandmarks: serializeGroups(results.poseLandmarks),
+          detections: [],
+        };
+        for (var li = 0; li < lh.length; li++) {
+          payload.detections.push({ landmarks: lh[li], label: "left", score: 0.85 });
+        }
+        for (var ri = 0; ri < rh.length; ri++) {
+          payload.detections.push({ landmarks: rh[ri], label: "right", score: 0.85 });
+        }
+      } else {
+        payload = handsToGroups(results);
+      }
+
       self.postMessage({
         type: "result",
         id: msg.id,
+        model: modelKind,
         inferMs: performance.now() - t0,
         wallSentMs: msg.wallSentMs,
         mediaMs: msg.timestamp,
