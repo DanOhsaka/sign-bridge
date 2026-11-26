@@ -112,8 +112,8 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         frames = data.get("frames") if isinstance(data, dict) else None
-        if not isinstance(frames, list) or len(frames) != 60:
-            payload = b'{"message":"Expected exactly 60 frames."}'
+        if not isinstance(frames, list) or len(frames) != 15:
+            payload = b'{"message":"Expected exactly 15 frames."}'
             self.send_response(400)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))

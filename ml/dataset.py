@@ -8,7 +8,7 @@ import numpy as np
 # Dataset configuration
 # ---------------------------------------------------------
 
-SEQUENCE_LENGTH = 60
+SEQUENCE_LENGTH = 15
 
 HAND_NAMES = [
     "wrist",

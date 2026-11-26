@@ -7,7 +7,7 @@ import tensorflow as tf
 from .dataset import frame_to_features
 
 
-SEQUENCE_LENGTH = 60
+SEQUENCE_LENGTH = 15
 FEATURE_COUNT = 146
 
 

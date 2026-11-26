@@ -1,5 +1,5 @@
 /* MIRROR of server/routes/predict.js — keep in sync.
-   The browser posts 60 shoulder-centered frames here.
+   The browser posts 15 shoulder-centered frames here.
    This route forwards that body to the Python model
    and returns its JSON. It does not use MongoDB. */
 
@@ -15,9 +15,9 @@ function lstmUrl() {
 router.post("/", async function (req, res) {
   var frames = req.body && req.body.frames;
 
-  if (!Array.isArray(frames) || frames.length !== 60) {
+  if (!Array.isArray(frames) || frames.length !== 15) {
     return res.status(400).json({
-      message: "Expected exactly 60 frames."
+      message: "Expected exactly 15 frames."
     });
   }
 

@@ -1,7 +1,7 @@
 // js/training/training.js
 (function () {
 
-  const FRAME_COUNT = 60;
+  const FRAME_COUNT = 15;
 
   // MediaPipe's 21 hand landmark names.
   const HAND_NAMES = [

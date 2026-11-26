@@ -12,7 +12,7 @@ const express = require("express");
 const router = express.Router();
 const fsp = fs.promises;
 const TRAINING_ROOT = path.resolve(__dirname, "..", "..", "training-data");
-const FRAME_COUNT = 60;
+const FRAME_COUNT = 15;
 
 function isLocalRequest(req) {
   var ip = (req.socket && req.socket.remoteAddress) || "";
