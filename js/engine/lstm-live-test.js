@@ -3,8 +3,11 @@
 
     // Same-origin proxy. The server forwards to the Python model.
     const API_URL = "/api/predict";
-    // signbridge_lstm.keras scores a 60-frame window.
+    // The model input stays 60 frames. Those frames are resampled from a
+    // shorter live window so a sign does not have to last for 60 detections.
     const SEQUENCE_LENGTH = 60;
+    const WINDOW_MS = 1500;
+    const MIN_SOURCE_FRAMES = 6;
     // Classify the latest window again after this many new detections.
     const STRIDE = 8;
     // One agreeing window is not enough; the next stride must match
@@ -166,12 +169,114 @@
         }
     }
 
+    function lerpNum(a, b, t) {
+        return a + (b - a) * t;
+    }
+
+    function lerpPoint(a, b, t) {
+        if (!a && !b) return null;
+        if (!a) return { x: b.x, y: b.y, z: b.z || 0 };
+        if (!b) return { x: a.x, y: a.y, z: a.z || 0 };
+        return {
+            x: lerpNum(a.x, b.x, t),
+            y: lerpNum(a.y, b.y, t),
+            z: lerpNum(a.z || 0, b.z || 0, t)
+        };
+    }
+
+    function cloneLandmarks(landmarks) {
+        const copy = {};
+        for (const name in landmarks) {
+            const point = landmarks[name];
+            copy[name] = point
+                ? { x: point.x, y: point.y, z: point.z || 0 }
+                : null;
+        }
+        return copy;
+    }
+
+    function lerpHand(a, b, t) {
+        const aOn = !!(a && a.detected && a.landmarks);
+        const bOn = !!(b && b.detected && b.landmarks);
+        if (!aOn && !bOn) {
+            return { detected: false, landmarks: null };
+        }
+        if (!aOn) {
+            return t >= 0.5
+                ? { detected: true, landmarks: cloneLandmarks(b.landmarks) }
+                : { detected: false, landmarks: null };
+        }
+        if (!bOn) {
+            return t < 0.5
+                ? { detected: true, landmarks: cloneLandmarks(a.landmarks) }
+                : { detected: false, landmarks: null };
+        }
+        const landmarks = {};
+        const names = {};
+        for (const name in a.landmarks) names[name] = true;
+        for (const name in b.landmarks) names[name] = true;
+        for (const name in names) {
+            landmarks[name] = lerpPoint(a.landmarks[name], b.landmarks[name], t);
+        }
+        return { detected: true, landmarks: landmarks };
+    }
+
+    function lerpFrame(a, b, t, index) {
+        const pose = {};
+        const poseNames = {};
+        const aPose = a.pose || {};
+        const bPose = b.pose || {};
+        for (const name in aPose) poseNames[name] = true;
+        for (const name in bPose) poseNames[name] = true;
+        for (const name in poseNames) {
+            pose[name] = lerpPoint(aPose[name], bPose[name], t);
+        }
+        return {
+            frame: index,
+            leftHand: lerpHand(a.leftHand, b.leftHand, t),
+            rightHand: lerpHand(a.rightHand, b.rightHand, t),
+            pose: pose
+        };
+    }
+
+    // Spread a short capture evenly across the 60 frames the model requires.
+    function resampleFrames(source, targetCount) {
+        if (source.length === targetCount) {
+            return source.map(function (frame, index) {
+                return lerpFrame(frame, frame, 0, index);
+            });
+        }
+        const out = new Array(targetCount);
+        const last = source.length - 1;
+        for (let i = 0; i < targetCount; i++) {
+            const pos = (i * last) / (targetCount - 1);
+            const i0 = Math.floor(pos);
+            const i1 = Math.min(last, i0 + 1);
+            out[i] = lerpFrame(source[i0], source[i1], pos - i0, i);
+        }
+        return out;
+    }
+
+    function sourceFrames() {
+        const count = frames.length;
+        if (count < MIN_SOURCE_FRAMES) return null;
+        const span = windowSpanMs();
+        if (span < WINDOW_MS) return null;
+        const start = frameTimes[count - 1] - WINDOW_MS;
+        let index = 0;
+        while (index < count - 1 && frameTimes[index] < start) index++;
+        const source = frames.slice(index);
+        if (source.length < MIN_SOURCE_FRAMES) return null;
+        return source;
+    }
+
     function maybeSend() {
         if (!active || sending) return;
-        if (frames.length < SEQUENCE_LENGTH) return;
         if (framesSinceSend < STRIDE) return;
+        const source = sourceFrames();
+        if (!source) return;
 
-        const sequence = frames.slice(-SEQUENCE_LENGTH);
+        const sequence = resampleFrames(source, SEQUENCE_LENGTH);
         const requestSession = session;
         framesSinceSend = 0;
         sending = true;
@@ -219,12 +324,14 @@
             return;
         }
 
-        /* Always keep the latest window — do not stall collection while HTTP is in flight. */
+        /* Keep the raw detections that cover the short window, then resample to 60. */
         frames.push(frame);
         frameTimes.push(performance.now());
-        if (frames.length > SEQUENCE_LENGTH) {
-            frames.shift();
+        const newest = frameTimes[frameTimes.length - 1];
+        const keepAfter = newest - WINDOW_MS - 250;
+        while (frameTimes.length > MIN_SOURCE_FRAMES && frameTimes[0] < keepAfter) {
             frameTimes.shift();
+            frames.shift();
         }
         framesSinceSend++;
         reportRate();

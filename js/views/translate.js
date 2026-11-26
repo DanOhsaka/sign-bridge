@@ -561,7 +561,7 @@ SB.TranslateView = function () {
       if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
       if (transcript && transcript.setLiveHint) {
         transcript.setLiveHint(lstmOn
-          ? "Words stream here from the Keras LSTM when a 60-frame Holistic window is confident."
+          ? "Words stream here from the Keras LSTM when a short sign, resampled to 60 frames, is confident."
           : live().hasClassifier()
             ? "Words stream here as one sentence when the model is confident."
             : "Live tracks hands. Transcript words appear when the LSTM is confident.");
