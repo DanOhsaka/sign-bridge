@@ -13,6 +13,14 @@ SB.TranslateView = function () {
   var transcript = null;
   var spotlight = null;
   var lastPrediction = null;
+  /* Adaptive confirm: high-confidence static glosses commit faster. */
+  var pending = null; /* { text, conf, source, firstMs, lastMs, glyph, alt } */
+  var confirmTimer = null;
+  /* Same gloss appends once until pose changes or hand leaves the frame. */
+  var lockedGloss = null; /* lowercase text last committed while hand stayed up */
+  var poseChangeNeeded = false; /* after commit, require a different held gloss */
+  var cameraOn = true; /* Camera chip — off stops tracks; on restarts Live */
+  var liveStarting = false;
 
   function live() { return SB.Engine.getLiveEngine(); }
 
@@ -194,7 +202,7 @@ SB.TranslateView = function () {
 
         var result = event.detail;
 
-        if (!result || !result.prediction) {
+        if (!result || !result.prediction || result.prediction === "NONE") {
           return;
         }
 
@@ -553,7 +561,7 @@ SB.TranslateView = function () {
       if (transcript && transcript.setStatus) transcript.setStatus("Live", true);
       if (transcript && transcript.setLiveHint) {
         transcript.setLiveHint(lstmOn
-          ? "Words stream here from the Keras LSTM when a 30-frame Holistic window is confident."
+          ? "Words stream here from the Keras LSTM when a 60-frame Holistic window is confident."
           : live().hasClassifier()
             ? "Words stream here as one sentence when the model is confident."
             : "Live tracks hands. Transcript words appear when the LSTM is confident.");

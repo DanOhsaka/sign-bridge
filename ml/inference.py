@@ -91,7 +91,7 @@ class SignBridgeLSTM:
         MIN_CONFIDENCE = 0.90
 
         if confidence < MIN_CONFIDENCE:
-            predicted_label = "NONE"
+            predicted_label = ""
 
 
         return {
